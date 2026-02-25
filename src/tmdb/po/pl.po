@@ -190,8 +190,8 @@ msgstr "TMDB Ustawienia"
 msgid "TMDb API Key:"
 msgstr "TMDb Klucz API:"
 
-msgid "TMDb Search"
-msgstr "TMDb Szukaj"
+msgid "TMDb search"
+msgstr "Szukaj w TMDb"
 
 msgid "TMDb: "
 msgstr "TMDb: "
@@ -226,44 +226,3 @@ msgstr "Strona"
 msgid "Cast"
 msgstr "Obsada"
 
-#~ msgid "Cancel"
-#~ msgstr "anuluj"
-
-#~ msgid "Cover resolution:"
-#~ msgstr "Cover Auflösung:"
-
-#~ msgid "Delete EIT file?"
-#~ msgstr "Lösche EIT Datei?"
-
-#, python-format
-#~ msgid "No Movie information found for %s"
-#~ msgstr "Keine Filminformationen für %s"
-
-#~ msgid "OK"
-#~ msgstr "Ok"
-
-#~ msgid "Save TMDb movie infos to file"
-#~ msgstr "Schreibe TMDB Film Information in Datei"
-
-#, python-format
-#~ msgid "TMDB: Results for %s"
-#~ msgstr "TMDb: Ergebnisse für %s"
-
-#~ msgid "TMDb"
-#~ msgstr "TMDb"
-
-#~ msgid "TMDb ... function for Movielist"
-#~ msgstr "TMDb ... Funktion für die Aufnahmenliste"
-
-#~ msgid "TMDb information created!"
-#~ msgstr "TMDb Informationen erstellt!"
-
-#~ msgid "TMDb: No results found, or does not respond!"
-#~ msgstr "TMDb: Keine Ergebnisse gefunden, oder antwortet nicht!"
-
-#, python-format
-#~ msgid "Try to find %s in tmdb ..."
-#~ msgstr "Versuche %s in tmdb zu finden ..."
-
-#~ msgid "Write TMDb Information?"
-#~ msgstr "Schreibe TMDb Informationen?"
