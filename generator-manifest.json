@@ -1,0 +1,18 @@
+{
+  "branch": "main",
+  "depends_recipe": "",
+  "description_control": "Show TMDb information",
+  "description_recipe": "Show TMDb information",
+  "history_source_dir": "tmdb",
+  "internal_package_name": "enigma2-plugin-extensions-tmdb",
+  "module_dir_name": "tmdb",
+  "output_subdir": "tmdb",
+  "package_name": "enigma2-plugin-extensions-tmdb",
+  "plugin_src_rel": "tmdb",
+  "python_package": "tmdb",
+  "rdepends_recipe": "python3-json python3-requests python3-tmdbsimple",
+  "replaces": "",
+  "repo_name": "tmdb",
+  "rrecommends": "",
+  "rreplaces": ""
+}
