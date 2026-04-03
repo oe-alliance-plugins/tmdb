@@ -13,7 +13,8 @@
 from enigma import eServiceCenter
 from Plugins.Plugin import PluginDescriptor
 
-from Components.config import *
+from Components.config import ConfigSubsection, ConfigSelection, ConfigYesNo, ConfigText, config
+
 from .__init__ import _
 from . import tmdb
 

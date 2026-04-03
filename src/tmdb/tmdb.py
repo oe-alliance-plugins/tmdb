@@ -44,11 +44,12 @@ import tmdbsimple as tmdb
 from .__init__ import _
 from .skins import tmdbScreenSkin, tmdbScreenMovieSkin, tmdbScreenPeopleSkin, tmdbScreenPersonSkin, tmdbScreenSeasonSkin
 
+from Components.SystemInfo import BoxInfo
+
 TrailerSupport = False
 YoutubeDL = None
 YoutubeDLP = None
 
-from Components.SystemInfo import BoxInfo
 distro = BoxInfo.getItem("distro").lower()
 if distro in ("openatv",):
 	try:
