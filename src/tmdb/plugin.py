@@ -44,7 +44,7 @@ config.plugins.tmdb.apiKey = ConfigText(default='intern')
 
 
 def movielist(session, service, **kwargs):
-#	reload(tmdb)
+# reload(tmdb)
 	serviceHandler = eServiceCenter.getInstance()
 	info = serviceHandler.info(service)
 	path = service.getPath()
@@ -59,7 +59,7 @@ def movielist(session, service, **kwargs):
 
 
 def eventinfo(session, eventName="", **kwargs):
-#	reload(tmdb)
+# reload(tmdb)
 	if not eventName:
 		s = session.nav.getCurrentService()
 		if s:
