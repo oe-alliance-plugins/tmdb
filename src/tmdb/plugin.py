@@ -16,7 +16,6 @@ from Plugins.Plugin import PluginDescriptor
 from Components.config import *
 from .__init__ import _
 from . import tmdb
-from importlib import reload
 
 
 pname = "TMDb"
@@ -30,7 +29,7 @@ try:
 	distro = BoxInfo.getItem("distro").lower()
 	if distro in ("openatv",):
 		defaultLang = "de"
-except:
+except Exception:
 	pass
 
 config.plugins.tmdb = ConfigSubsection()
