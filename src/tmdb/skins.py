@@ -28,9 +28,9 @@ if getDesktop(0).size().width() >= 1920:
 				<widget name="backdrop" position="0,0" size="1920,1080" zPosition="-5" alphatest="blend"/>
 				<ePixmap pixmap="/usr/lib/enigma2/python/Plugins/Extensions/tmdb/pic/tmdb.png" position="1585,800" size="150,155" alphatest="blend" />
 				<ePixmap pixmap="/usr/lib/enigma2/python/Plugins/Extensions/tmdb/pic/backdrop_dark.png" position="0,0" size="1920,1080" zPosition="-4" alphatest="blend" />
-				<widget name="rating" position="1000,83" size="150,30" zPosition="2" font="Regular;27" halign="center" foregroundColor="black" backgroundColor="#00ffba00" transparent="1"/>
-				<widget name="votes_brackets" position="1000,145" size="150,30" zPosition="2" font="Regular;27" halign="center" transparent="1"/>
-				<ePixmap position="1025,45" size="100,100" zPosition="0" pixmap="/usr/lib/enigma2/python/Plugins/Extensions/tmdb/pic/star.png" transparent="1" alphatest="blend"/>
+				<widget name="rating" position="1020,90" size="150,30" zPosition="2" font="Regular;27" halign="center" foregroundColor="black" backgroundColor="#00ffba00" transparent="1"/>
+				<widget name="votes_brackets" position="1020,140" size="150,30" zPosition="2" font="Regular;27" halign="center" transparent="1"/>
+				<ePixmap position="1025,45" size="150,150" zPosition="0" pixmap="/usr/lib/enigma2/python/Plugins/Extensions/tmdb/pic/star.png" transparent="1" alphatest="blend"/>
 				<widget name="fsk" position="0,0" size="0,0" zPosition="2" font="Regular;27" halign="center" transparent="1"/>
 				<widget name="fsklogo" position="1200,60" size="100,100" zPosition="2" alphatest="blend"/>
 				<widget name="year_txt" position="1000,300" size="400,33" zPosition="2" font="Regular;27" foregroundColor="#00ffffff" backgroundColor="#00303030" transparent="1"/>
@@ -142,9 +142,9 @@ else:
 				<ePixmap pixmap="/usr/lib/enigma2/python/Plugins/Extensions/tmdb/pic/backdrop.jpg" position="0,0" size="1280,720" zPosition="-6" scale="1" alphatest="blend" />
 				<widget name="backdrop" position="0,0" size="1280,720" zPosition="-5" alphatest="blend"/>
 				<ePixmap pixmap="/usr/lib/enigma2/python/Plugins/Extensions/tmdb/pic/backdrop_dark.png" position="0,0" size="1280,720" zPosition="-4" alphatest="blend" />
-				<widget name="rating" position="640,85" size="150,25" zPosition="2" font="Regular;22" halign="center" foregroundColor="black" backgroundColor="#00ffba00" transparent="1"/>
-				<widget name="votes_brackets" position="640,145" size="150,25" zPosition="2" font="Regular;22" halign="center" transparent="1"/>
-				<ePixmap position="665,45" size="100,100" zPosition="0" pixmap="/usr/lib/enigma2/python/Plugins/Extensions/tmdb/pic/star.png" transparent="1" alphatest="blend"/>
+				<widget name="rating" position="660,90" size="150,25" zPosition="2" font="Regular;22" halign="center" foregroundColor="black" backgroundColor="#00ffba00" transparent="1"/>
+				<widget name="votes_brackets" position="660,140" size="150,25" zPosition="2" font="Regular;22" halign="center" transparent="1"/>
+				<ePixmap position="665,45" size="150,150" zPosition="0" pixmap="/usr/lib/enigma2/python/Plugins/Extensions/tmdb/pic/star.png" transparent="1" alphatest="blend"/>
 				<widget name="fsk" position="0,0" size="0,0" zPosition="2" font="Regular;22" halign="center" transparent="1"/>
 				<widget name="fsklogo" position="805,60" size="100,100" zPosition="2" alphatest="blend"/>
 				<widget name="year_txt" position="650,300" size="400,25" zPosition="2" font="Regular;22" foregroundColor="#00ffffff" backgroundColor="#00303030" transparent="1"/>
