@@ -19,10 +19,10 @@ from .__init__ import _
 from . import tmdb
 
 
-pname = "TMDb"
-pdesc = _("Show movie details from TMDb")
-pversion = "1.0.1"
-pdate = "20230711"
+pname = "TMDB"
+pdesc = _("Show movie details from TMDB")
+pversion = "1.0.2"
+pdate = "20260508"
 
 defaultLang = "en"
 try:
@@ -45,7 +45,6 @@ config.plugins.tmdb.apiKey = ConfigText(default='intern')
 
 
 def movielist(session, service, **kwargs):
-# reload(tmdb)
 	serviceHandler = eServiceCenter.getInstance()
 	info = serviceHandler.info(service)
 	path = service.getPath()
@@ -54,20 +53,19 @@ def movielist(session, service, **kwargs):
 		path = ""
 	else:
 		eventName = info.getName(service)
-	print("[TMDb] eventName", eventName)
-	print("[TMDb] path", path)
+	print("[TMDB] eventName", eventName)
+	print("[TMDB] path", path)
 	session.open(tmdb.tmdbScreen, eventName, path)
 
 
 def eventinfo(session, eventName="", **kwargs):
-# reload(tmdb)
 	if not eventName:
 		s = session.nav.getCurrentService()
 		if s:
 			info = s.info()
 			event = info.getEvent(0)  # 0 = now, 1 = next
 			eventName = event and event.getEventName() or ''
-	print("[TMDb] eventName", eventName)
+	print("[TMDB] eventName", eventName)
 	session.open(tmdb.tmdbScreen, eventName)
 
 
@@ -78,13 +76,18 @@ def channelSelectionContextMenu(session, service=None, *args, **kwargs):
 		eventName = event and event.getEventName() or ''
 		session.open(tmdb.tmdbScreen, eventName)
 	except Exception as e:
-		print(f"[TMDb] Error: channelSelectionContextMenu {e}")
+		print(f"[TMDB] Error: channelSelectionContextMenu {e}")
+
+
+def setup(session, **kwargs):
+	session.open(tmdb.tmdbConfigScreen)
 
 
 def Plugins(**kwargs):
 	pList = [
-			PluginDescriptor(name="TMDb", description=_("TMDb search"), where=PluginDescriptor.WHERE_MOVIELIST, fnc=movielist, needsRestart=False),
-			PluginDescriptor(name=_("TMDb search"), description=_("TMDb search"), where=PluginDescriptor.WHERE_CHANNEL_CONTEXT_MENU, needsRestart=False, fnc=channelSelectionContextMenu),
-			PluginDescriptor(name=_("TMDb search"), description=_("The Movie Database gives detailed information about the selected program or movie."), where=PluginDescriptor.WHERE_EVENTINFO, fnc=eventinfo, needsRestart=False)
+			PluginDescriptor(name="TMDB", description=_("TMDB search"), where=PluginDescriptor.WHERE_MOVIELIST, fnc=movielist, needsRestart=False),
+			PluginDescriptor(name=_("TMDB search"), description=_("TMDB search"), where=PluginDescriptor.WHERE_CHANNEL_CONTEXT_MENU, needsRestart=False, fnc=channelSelectionContextMenu),
+			PluginDescriptor(name=_("TMDB search"), description=_("The Movie Database gives detailed information about the selected program or movie."), where=PluginDescriptor.WHERE_EVENTINFO, fnc=eventinfo, needsRestart=False),
+			PluginDescriptor(name=_("TMDB settings"), description=_("Settings for The Movie Database."), icon="tmdb.png", where=PluginDescriptor.WHERE_PLUGINMENU, fnc=setup, needsRestart=False)
 			]
 	return pList

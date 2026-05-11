@@ -12,8 +12,9 @@
 
 from base64 import b64decode
 from os import mkdir, remove
-from os.path import exists, isdir
+from os.path import basename, exists, isdir
 from re import search, sub, I, S
+from time import localtime, strptime
 
 from Components.ActionMap import HelpableActionMap
 from Components.Label import Label
@@ -41,8 +42,8 @@ from PIL import Image
 from twisted.internet.reactor import callInThread
 
 import tmdbsimple as tmdb
-from .__init__ import _
-from .skins import tmdbScreenSkin, tmdbScreenMovieSkin, tmdbScreenPeopleSkin, tmdbScreenPersonSkin, tmdbScreenSeasonSkin
+from .__init__ import _, _s
+from .skins import tmdbListParams, tmdbScreenSkin, tmdbScreenMovieSkin, tmdbScreenPeopleSkin, tmdbScreenPersonSkin, tmdbScreenSeasonSkin, tmdbScreenReviewsSkin
 
 from Components.SystemInfo import BoxInfo
 
@@ -65,19 +66,17 @@ if distro in ("openatv",):
 		YoutubeDLP = None
 
 
-pname = "TMDb"
-pdesc = _("Show movie details from TMDb")
-pversion = "1.0.1"
-pdate = "20230711"
+pname = "TMDB"
+pdesc = _("Show movie details from TMDB")
+pversion = "1.0.2"
+pdate = "20260508"
 
 tmdb.REQUESTS_SESSION = Session()
 tmdb.REQUESTS_TIMEOUT = (5, 30)
 
-noCover = "/usr/lib/enigma2/python/Plugins/Extensions/tmdb/pic/no_cover.jpg"
+noCover = "/usr/lib/enigma2/python/Plugins/Extensions/tmdb/pic/no_cover.png"
+noCoverP = "/usr/lib/enigma2/python/Plugins/Extensions/tmdb/pic/no_cover_p.png"
 tempDir = "/tmp/tmdb/"
-
-if not isdir(tempDir):
-	mkdir(tempDir)
 
 DEFAULT = 0
 CURRENT_MOVIES = 1
@@ -87,6 +86,9 @@ SIMILAR_MOVIES = 4
 RECOMENDED_MOVIES = 5
 BEST_RATED_MOVIES = 6
 
+colorNormal = "\\c00ffffff"
+colorHighlight = "\\c00fff000"
+
 
 def debug(s, flag="a"):  # pass
 	with open("/usr/lib/enigma2/python/Plugins/Extensions/tmdb/debug.txt", flag) as f:
@@ -94,43 +96,58 @@ def debug(s, flag="a"):  # pass
 
 
 def cleanText(text):
-	cutlist = ['x264', '720p', '1080p', '1080i', 'PAL', 'GERMAN', 'ENGLiSH', 'WS', 'DVDRiP', 'UNRATED', 'RETAIL', 'Web-DL', 'DL', 'LD', 'MiC', 'MD', 'DVDR', 'BDRiP', 'BLURAY', 'DTS', 'UNCUT', 'ANiME',
-				'AC3MD', 'AC3', 'AC3D', 'TS', 'DVDSCR', 'COMPLETE', 'INTERNAL', 'DTSD', 'XViD', 'DIVX', 'DUBBED', 'LINE.DUBBED', 'DD51', 'DVDR9', 'DVDR5', 'h264', 'AVC',
-				'WEBHDTVRiP', 'WEBHDRiP', 'WEBRiP', 'WEBHDTV', 'WebHD', 'HDTVRiP', 'HDRiP', 'HDTV', 'ITUNESHD', 'REPACK', 'SYNC']
-	text = text.replace('.wmv', '').replace('.flv', '').replace('.ts', '').replace('.m2ts', '').replace('.mkv', '').replace('.avi', '').replace('.mpeg', '').replace('.mpg', '').replace('.iso', '').replace('.mp4', '')
+	cutlist = ['x264', '720p', '1080p', '1080i', 'PAL', 'GERMAN', 'ENGLiSH', 'WS',
+				'DVDRiP', 'UNRATED', 'RETAIL', 'Web-DL', 'DL', 'LD', 'MiC', 'MD', 'DVDR',
+				'BDRiP', 'BLURAY', 'DTS', 'UNCUT', 'ANiME', 'AC3MD', 'AC3', 'AC3D', 'TS',
+				'DVDSCR', 'COMPLETE', 'INTERNAL', 'DTSD', 'XViD', 'DIVX', 'DUBBED',
+				'LINE.DUBBED', 'DD51', 'DVDR9', 'DVDR5', 'h264', 'AVC', 'WEBHDTVRiP',
+				'WEBHDRiP', 'WEBRiP', 'WEBHDTV', 'WebHD', 'HDTVRiP', 'HDRiP', 'HDTV',
+				'ITUNESHD', 'REPACK', 'SYNC']
+	text = cleanEnd(text)
 
 	for word in cutlist:
-		text = sub(r'(\_|\-|\.|\+)' + word + r'(\_|\-|\.|\+)', '+', text, flags=I)
-	text = text.replace('.', ' ').replace('-', ' ').replace('_', ' ').replace('+', '').replace(" Director's Cut", "").replace(" director's cut", "").replace("[Uncut]", "").replace("Uncut", "").replace("Elokuva: ", "").replace("Uusi Kino: ", "").replace("Kino Klassikko: ", "").replace("Kino Suomi: ", "").replace("Kino: ", "")
+		text = sub(r'[-_.+]' + word + r'[-_.+]', '+', text, flags=I)
+	text = text.replace('.', ' ').replace('-', ' ').replace('_', ' ').replace('+', '')\
+			.replace(" Director's Cut", "").replace(" director's cut", "")\
+			.replace("[Uncut]", "").replace("Uncut", "").replace("Elokuva: ", "")\
+			.replace("Uusi Kino: ", "").replace("Kino Klassikko: ", "")\
+			.replace("Kino Suomi: ", "").replace("Kino: ", "")
 
 	text_split = text.split()
-	if text_split and text_split[0].lower() in ("new:", "live:"):
+	if text_split and text_split[0].lower() in ("new:", "live:", "movie:"):
 		text_split.pop(0)  # remove annoying prefixes
 	text = " ".join(text_split)
 
-	if search(r'[Ss][\d]+[Ee][\d]+', text):
-		text = sub(r'[Ss][\d]+[Ee][\d]+.*[\w]+', '', text, flags=S | I)
-	text = sub(r'\(.*\)', '', text).rstrip()  # remove episode number from series, like "series name (234)"
+	if search(r'S\d+E\d+', text, flags=I):
+		text = sub(r'S\d+E\d+.*\w+', '', text, flags=S | I)
+	text = sub(r'\(\d+\)$', '', text).rstrip()  # remove episode number from series, like "series name (234)"
 
 	return text
 
 
 def cleanEnd(text):
-	text = text.replace('.wmv', '').replace('.flv', '').replace('.ts', '').replace('.m2ts', '').replace('.mkv', '').replace('.avi', '').replace('.mpeg', '').replace('.mpg', '').replace('.iso', '').replace('.mp4', '')
+	text = text.replace('.wmv', '').replace('.flv', '').replace('.ts', '')\
+			.replace('.m2ts', '').replace('.mkv', '').replace('.avi', '')\
+			.replace('.mpeg', '').replace('.mpg', '').replace('.iso', '')\
+			.replace('.mp4', '')
 	return text
 
 
+def highlightText(s):
+	return colorHighlight + str(s) + colorNormal
+
+
 def threadDownloadPage(link, file, success, fail=None):
-	link = link.encode('ascii', 'xmlcharrefreplace').decode().replace(' ', '%20').replace('\n', '')
+	url = link.encode('ascii', 'xmlcharrefreplace').decode().replace(' ', '%20').replace('\n', '')
 	try:
-		response = get(link, timeout=(3.05, 6))
+		response = get(url, timeout=(3.05, 6))
 		response.raise_for_status()
 		with open(file, "wb") as f:
 			f.write(response.content)
-		success(file)
+		success(file, link)
 	except exceptions.RequestException as error:
 		if fail is not None:
-			fail(error)
+			fail(error, link)
 
 
 class CoverHelper():
@@ -148,6 +165,22 @@ class CoverHelper():
 			self.picloadFsk = ePicLoad()
 			self.picloadFsk.PictureData.get().append(self.showFskCallback)
 
+		self.delayTimer = eTimer()
+
+	def imageURL(self, path):
+		return f"http://image.tmdb.org/t/p/{config.plugins.tmdb.themoviedb_coversize.value}/{path}"
+
+	def avatarURL(self, path):
+		size = [90, 180, 300, 300][config.plugins.tmdb.themoviedb_coversize.index]
+		return f"http://image.tmdb.org/t/p/w{size}_and_h{size}_face/{path}"
+
+	def delayDownload(self, url, fileName, onData, onError):
+		self.delayTimer.stop()
+		if self.delayTimer.callback:
+			del self.delayTimer.callback[0]
+		self.delayTimer.callback.append(boundFunction(callInThread, threadDownloadPage, url, fileName, onData, onError))
+		self.delayTimer.start(500, True)
+
 	def decodeCover(self, coverName):
 		size = self['cover'].instance.size()
 		self.picloadCover.setPara((size.width(), size.height(), 1, 1, False, 1, ""))
@@ -155,7 +188,7 @@ class CoverHelper():
 
 	def decodeBackdrop(self, coverName):
 		size = self['backdrop'].instance.size()
-		self.picloadBackdrop.setPara((size.width(), size.height(), 1, 1, False, 1, ""))
+		self.picloadBackdrop.setPara((size.width(), size.height(), 0, 0, False, 1, ""))
 		self.picloadBackdrop.startDecode(coverName)
 
 	def decodeFsk(self, coverName):
@@ -181,20 +214,38 @@ class CoverHelper():
 			self["fsklogo"].instance.setPixmap(ptr.__deref__())
 			self["fsklogo"].show()
 
+	def backdropName(self):
+		return f"{tempDir}{self.media}-{self.id}-backdrop.jpg"
+
+	def showBackdrop(self):
+		backdropSaved = self.backdropName()
+		if exists(backdropSaved):
+			self.decodeBackdrop(backdropSaved)
+
 
 class createList(MenuList):
 	def __init__(self):
 		MenuList.__init__(self, [], content=eListboxPythonMultiContent)
-		font, size = parameters.get("TMDbListFont", ('Regular', 25))
+		font = parameters.get("TMDbListFont", ('Regular', tmdbListParams[0]))
+		if len(font) == 2:
+			font += (tmdbListParams[1],)
+		font, size, self.itemHeight = font
 		self.l.setFont(0, gFont(font, size))
-		self.l.setItemHeight(30)
+		self.l.setItemHeight(self.itemHeight)
 		self.l.setBuildFunc(self.buildList)
+
+	def applySkin(self, desktop, screen):
+		for attrib, value in self.skinAttributes:
+			if attrib == "itemHeight":
+				self.itemHeight = int(value)
+				break
+		return MenuList.applySkin(self, desktop, screen)
 
 	def buildList(self, entry):
 		# width = self.l.getItemSize().width()
 		res = [None]
-		x, y, w, h = parameters.get("TMDbListName", (5, 1, 1920, 40))
-		res.append((eListboxPythonMultiContent.TYPE_TEXT, x, y, w, h, 0, RT_HALIGN_LEFT | RT_VALIGN_CENTER, entry[0]))
+		x, y, w, h = parameters.get("TMDbListName", (5, 1, 1920, self.itemHeight))
+		res.append((eListboxPythonMultiContent.TYPE_TEXT, x, y, w, h, 0, RT_HALIGN_LEFT | RT_VALIGN_CENTER, entry and entry[0]))
 		return res
 
 	def getCurrent(self):
@@ -205,32 +256,32 @@ class createList(MenuList):
 class tmdbConfigScreen(Setup):
 	def __init__(self, session):
 		Setup.__init__(self, session, "TMDB", plugin="Extensions/tmdb", PluginLanguageDomain="tmdb")
-		self.setTitle(f"TMDb - The Movie Database v{pversion}")
+		self.setTitle(f"TMDB - The Movie Database v{pversion}")
 
 
 class tmdbScreen(Screen, HelpableScreen, CoverHelper):
 	skin = tmdbScreenSkin
 
-	def __init__(self, session, text, path=""):
+	def __init__(self, session, text, path="", results=None, keepTemp=False):
 		Screen.__init__(self, session)
 		tmdb.API_KEY = b64decode('ZDQyZTZiODIwYTE1NDFjYzY5Y2U3ODk2NzFmZWJhMzk=')
 		if config.plugins.tmdb.apiKey.value != "intern":
 			tmdb.API_KEY = config.plugins.tmdb.apiKey.value
-# print("[TMDb][tmdbScreen] API Key User: " + str(tmdb.API_KEY))
+		# print(f"[TMDB][tmdbScreen] API Key User: {tmdb.API_KEY}")
 		self.cert = config.plugins.tmdb.cert.value
 		self.text = cleanText(str(text))
 		self.saveFilename = str(path)
-		self.piclist = ""
+		self.results = results
+		self.keepTemp = keepTemp
 		self.covername = noCover
 		self.actcinema = DEFAULT
-		self.searchtitle = (_("TMDb: ") + _("Results for %s"))
-		# self.title = " "
+		self.searchtitle = (_("TMDB: ") + _("Results for %s"))
 		self.page = 1
 		self.id = 1
 		if not isdir(tempDir):
 			mkdir(tempDir)
 
-		print(f"[TMDb][tmdbScreen] Search for {self.text}")
+		print(f"[TMDB][tmdbScreen] Search for {self.text}")
 
 		HelpableScreen.__init__(self)
 		self["actions"] = HelpableActionMap(self, "TMDbActions",
@@ -239,25 +290,32 @@ class tmdbScreen(Screen, HelpableScreen, CoverHelper):
 				"cancel": (self.cancel, _("Exit")),
 				"up": (self.keyUp, _("Selection up")),
 				"down": (self.keyDown, _("Selection down")),
-				"nextBouquet": (self.chDown, _("Details down")),
-				"prevBouquet": (self.chUp, _("Details up")),
+				"prevBouquet": (self.chDown, _("Overview down or next list page")),
+				"nextBouquet": (self.chUp, _("Overview up or previous list page")),
 				"left": (self.keyLeft, _("Page up")),
 				"right": (self.keyRight, _("Page down")),
 				"red": (self.cancel, _("Exit")),
 				"green": (self.ok, _("Show details")),
 				"yellow": (self.searchString, _("Edit search")),
-				"blue": (self.menu, _("More")),
+				"blue": (self.menu, _("Choose a movie list")),
 				"menu": (self.setup, _("Setup")),
 				"eventview": (self.searchString, _("Edit search"))
 			}, -1)
 
-		self['searchinfo'] = Label(_("TMDb: ") + _("Loading..."))
+		self['searchinfo'] = Label(_("TMDB: ") + _("Loading..."))
 		self['key_red'] = Label(_("Exit"))
 		self['key_green'] = Label(_("Details"))
 		self['key_yellow'] = Label(_("Edit search"))
 		self['key_blue'] = Label(_("More"))
 		self["key_menu"] = StaticText(_("MENU"))  # auto menu button
 		self['list'] = createList()
+		self['overview'] = ScrollLabel("")
+		self['title'] = Label("-")
+		self['title_txt'] = Label(_("Original\nTitle:"))
+		self['lang'] = Label("-")
+		self['lang_txt'] = Label(_("Language:"))
+		self['rating'] = Label("-")
+		self['rating_txt'] = Label(_("Rating:"))
 
 		CoverHelper.__init__(self)
 
@@ -266,10 +324,11 @@ class tmdbScreen(Screen, HelpableScreen, CoverHelper):
 	def onFinish(self):
 		if self.text:
 			self.timer = eTimer()
+			self.timer.callback.append(self.ok)
 			callInThread(self.tmdbSearch)
 		else:
-			print("[TMDb][tmdbScreen] no movie found.")
-			self['searchinfo'].setText(_("TMDb: ") + _("No results for %s") % self.text)
+			print("[TMDB][tmdbScreen] no movie found.")
+			self['searchinfo'].setText(_("TMDB: ") + _("No results for %s") % self.text)
 
 	def menu(self):
 		options = [
@@ -285,48 +344,57 @@ class tmdbScreen(Screen, HelpableScreen, CoverHelper):
 
 	def menuCallback(self, ret):
 		self.id = 1
-		self.title = " "
+		self.title = ""
 		self.page = 1
 		self.totalpages = 1
 		if ret is not None:
 			self.searchtitle = ret[0]
 			self.actcinema = ret[1]
-		if self.actcinema in (4, 5):
+		if self.actcinema in (SIMILAR_MOVIES, RECOMENDED_MOVIES):
 			self.id = self['list'].getCurrent()[3]
 			self.title = self['list'].getCurrent()[0]
 		callInThread(self.tmdbSearch)
 
 	def tmdbSearch(self):
-		self['searchinfo'].setText(_("TMDb: ") + _("Search for %s ...") % self.text)
+		self['searchinfo'].setText(_("TMDB: ") + _("Search for %s ...") % self.text)
 		self.lang = config.plugins.tmdb.lang.value
 		res = []
 		self.count = 0
 		json_data = {}
-		if self.actcinema not in (CURRENT_MOVIES, UPCOMING_MOVIES, POPULAR_MOVIES, SIMILAR_MOVIES, RECOMENDED_MOVIES, BEST_RATED_MOVIES):
-			search = tmdb.Search()
-			json_data = search.multi(query=self.text, language=self.lang)
-		elif self.actcinema == CURRENT_MOVIES:
-			json_data = tmdb.Movies().now_playing(page=self.page, language=self.lang)
-		elif self.actcinema == UPCOMING_MOVIES:
-			json_data = tmdb.Movies().upcoming(page=self.page, language=self.lang)
-		elif self.actcinema == POPULAR_MOVIES:
-			json_data = tmdb.Movies().popular(page=self.page, language=self.lang)
-		elif self.actcinema == SIMILAR_MOVIES:
-			json_data = tmdb.Movies(self.id).similar_movies(page=self.page, language=self.lang)
-		elif self.actcinema == RECOMENDED_MOVIES:
-			json_data = tmdb.Movies(self.id).recommendations(page=self.page, language=self.lang)
-		elif self.actcinema == BEST_RATED_MOVIES:
-			json_data = tmdb.Movies().top_rated(page=self.page, language=self.lang)
-# print("[TMDb][tmdbSearch] json output\n", json_data)
+		try:
+			if self.results:
+				json_data = self.results
+			elif self.actcinema == DEFAULT:
+				search = tmdb.Search()
+				json_data = search.multi(query=self.text, language=self.lang)
+			elif self.actcinema == CURRENT_MOVIES:
+				json_data = tmdb.Movies().now_playing(page=self.page, language=self.lang)
+			elif self.actcinema == UPCOMING_MOVIES:
+				json_data = tmdb.Movies().upcoming(page=self.page, language=self.lang)
+			elif self.actcinema == POPULAR_MOVIES:
+				json_data = tmdb.Movies().popular(page=self.page, language=self.lang)
+			elif self.actcinema == SIMILAR_MOVIES:
+				json_data = tmdb.Movies(self.id).similar_movies(page=self.page, language=self.lang)
+			elif self.actcinema == RECOMENDED_MOVIES:
+				json_data = tmdb.Movies(self.id).recommendations(page=self.page, language=self.lang)
+			elif self.actcinema == BEST_RATED_MOVIES:
+				json_data = tmdb.Movies().top_rated(page=self.page, language=self.lang)
+				# print("[TMDB][tmdbSearch] json output\n", json_data)
+		except Exception as e:
+			print("[TMDB][tmdbScreen] tmdb search fail", e)
+			self['searchinfo'].setText(_("TMDB: ") + _("No results found, or does not respond!"))
+			return
 		if json_data and json_data['results']:
 			self.totalpages = json_data['total_pages']
-# print("[TMDb][tmdbSearch] results", json_data)
+			# print("[TMDB][tmdbSearch] results", json_data)
 
 			for IDs in json_data['results']:
 				self.count += 1
 				media = fid = title = date = coverPath = backdropPath = ""
 				if 'media_type' in IDs:
 					media = IDs['media_type']
+				else:
+					media = "movie"
 				if 'id' in IDs:
 					fid = str(IDs['id'])
 				if 'title' in IDs:
@@ -344,52 +412,71 @@ class tmdbScreen(Screen, HelpableScreen, CoverHelper):
 
 				title = f"{title} ({mediasubst}{date})"
 				if 'poster_path' in IDs:
-					coverPath = IDs['poster_path']
+					coverPath = str(IDs['poster_path'])
 				if 'backdrop_path' in IDs:
-					backdropPath = IDs['backdrop_path']
+					backdropPath = str(IDs['backdrop_path'])
 
-				url_cover = f"http://image.tmdb.org/t/p/{config.plugins.tmdb.themoviedb_coversize.value}/{coverPath}"
-				url_backdrop = f"http://image.tmdb.org/t/p/{config.plugins.tmdb.themoviedb_coversize.value}/{backdropPath}"
+				url_cover = self.imageURL(coverPath)
+				url_backdrop = self.imageURL(backdropPath)
+
+				otitle = lang = rating = "-"
+				overview = ""
+				if 'original_title' in IDs:
+					otitle = IDs['original_title']
+				elif 'original_name' in IDs:
+					otitle = IDs['original_name']
+				if 'original_language' in IDs:
+					lang = str(IDs['original_language'])
+				if 'vote_average' in IDs:
+					rating = f"{IDs['vote_average']:.1f} ({IDs['vote_count']})"
+				if 'overview' in IDs:
+					overview = IDs['overview']
 
 				if fid or title or media:
-					res.append(((title, url_cover, media, fid, url_backdrop),))
-# print("[TMDb][tmdbSearch] res", res)
+					res.append(((title, url_cover, media, fid, url_backdrop, otitle, lang, rating, overview),))
+			# print("[TMDB][tmdbSearch] res", res)
 			if res:
 				self['list'].setList(res)
-				self.piclist = res
-				if self.actcinema >= 1:
-					self['searchinfo'].setText(f"{_('TMDb: ')}{self.searchtitle} ({_('page ')}{self.page}/{self.totalpages}) {self.title})")
+				if self.actcinema != DEFAULT:
+					self['searchinfo'].setText(f"{_('TMDB: ')}{self.searchtitle} ({_('page ')}{self.page}/{self.totalpages}) {self.title}"
 				else:
-					self['searchinfo'].setText(_("TMDb: ") + _("Results for %s") % self.text)
+					self['searchinfo'].setText(_("TMDB: ") + _("Results for %s") % self.text)
+				self['list'].moveTop()
 				self.getInfo()
-				self['list'].pageUp()
 		else:
-			print("[TMDb] data not found")
+			print("[TMDB] data not found")
 			self.showCover(noCover)
-			self['searchinfo'].setText(_("TMDb: ") + _("Data not found!"))
+			self['searchinfo'].setText(_("TMDB: ") + _("Data not found!"))
 			if self.count == 1:
-				self['searchinfo'].setText(_("TMDb: ") + _("Results for %s") % self.text)
+				self['searchinfo'].setText(_("TMDB: ") + _("Results for %s") % self.text)
 			if "total_results" not in json_data or json_data['total_results'] == 0:
-				self['searchinfo'].setText(_("TMDb: ") + _("No results for %s") % self.text)
+				self['searchinfo'].setText(_("TMDB: ") + _("No results for %s") % self.text)
 
 	def getInfo(self):
-		url_cover = self['list'].getCurrent()[1]
-		fid = self['list'].getCurrent()[3]
+		current = self['list'].getCurrent()
+		url_cover = current[1]
+		fid = current[3]
+		self['title'].setText(current[5])
+		self['lang'].setText(current[6])
+		self['rating'].setText(current[7])
+		self['overview'].setText(current[8])
 
 		if url_cover.endswith("None"):
 			self.showCover(noCover)
 		else:
-			fileName = f"{tempDir}{fid}.jpg"
+			fileName = f"{tempDir}{current[2]}-{fid}.jpg"
 			if not exists(fileName):
-				callInThread(threadDownloadPage, url_cover, fileName, boundFunction(self.getData, fileName, self.dataError))
+				self.delayDownload(url_cover, fileName, self.getData, self.dataError)
 			else:
 				self.showCover(fileName)
 
-	def getData(self, coverSaved, *args, **kwargs):
-		self.showCover(coverSaved)
+	def getData(self, coverSaved, url_cover):
+		if 'list' in self and url_cover == self['list'].getCurrent()[1]:
+			self.showCover(coverSaved)
 
-	def dataError(self, error):
-		print(f"[TMDb] Error: {error}")
+	def dataError(self, error, url_cover):
+		print(f"[TMDB] Error: {error}")
+		self.getData(noCover, url_cover)
 
 	def showCover(self, coverName):
 		if not exists(coverName):
@@ -401,7 +488,6 @@ class tmdbScreen(Screen, HelpableScreen, CoverHelper):
 		# Only one result, launch details
 		if config.plugins.tmdb.firsthit.value:
 			if self.count == 1:
-				self.timer.callback.append(self.ok)
 				self.timer.start(100, False)
 
 	def ok(self):
@@ -409,11 +495,11 @@ class tmdbScreen(Screen, HelpableScreen, CoverHelper):
 		check = self['list'].getCurrent()
 		if check is not None:
 			# title, url_cover, media, id, url_backdrop
-			title = self['list'].getCurrent()[0]
-			media = self['list'].getCurrent()[2]
-			fid = self['list'].getCurrent()[3]
-			self.covername = f"{tempDir}{fid}.jpg"
-			self.url_backdrop = self['list'].getCurrent()[4]
+			title = check[0]
+			media = check[2]
+			fid = check[3]
+			self.covername = f"{tempDir}{media}-{fid}.jpg"
+			self.url_backdrop = check[4]
 			self.session.open(tmdbScreenMovie, title, media, self.covername, fid, self.saveFilename, self.url_backdrop)
 
 	def keyLeft(self):
@@ -446,6 +532,8 @@ class tmdbScreen(Screen, HelpableScreen, CoverHelper):
 			if self.page > self.totalpages:
 				self.page = 1
 			callInThread(self.tmdbSearch)
+		else:
+			self['overview'].pageDown()
 
 	def chUp(self):
 		if self.actcinema != DEFAULT:
@@ -453,6 +541,8 @@ class tmdbScreen(Screen, HelpableScreen, CoverHelper):
 			if self.page <= 0:
 				self.page = 1
 			callInThread(self.tmdbSearch)
+		else:
+			self['overview'].pageUp()
 
 	def keyYellow(self):
 		return
@@ -467,11 +557,12 @@ class tmdbScreen(Screen, HelpableScreen, CoverHelper):
 	def goSearch(self, newTitle):
 		if newTitle:
 			self.text = newTitle
-			print(f"[TMDb] Manual search for: {str(self.text)}")
+			print(f"[TMDB] Manual search for: {self.text}")
 			callInThread(self.tmdbSearch)
 
 	def cancel(self):
-		self.delCover()
+		if not self.keepTemp:
+			self.delCover()
 		self.close()
 
 	def delCover(self):
@@ -486,13 +577,11 @@ class tmdbScreenMovie(Screen, HelpableScreen, CoverHelper):
 		Screen.__init__(self, session)
 		self.mname = mname
 		self.media = media
-		if self.media == "movie":
-			self.movie = True
-		else:
-			self.movie = False
+		self.movie = self.media == "movie"
 		self.coverName = coverName
 		self.url_backdrop = url_backdrop
 		self.id = fid
+		self.info = self.credits = None
 		self.saveFilename = saveFilename
 
 		HelpableScreen.__init__(self)
@@ -505,27 +594,25 @@ class tmdbScreenMovie(Screen, HelpableScreen, CoverHelper):
 				"left": (self.keyLeft, _("Page up")),
 				"right": (self.keyRight, _("Page down")),
 				"red": (self.cancel, _("Exit")),
-				"green": (self.keyGreen, _("Crew")),
+				"green": (self.keyGreen, _("Cast")),
 				"yellow": (self.keyYellow, _("Seasons")),
-				"blue": (self.menu, _("More")),
+				"blue": (self.menu, _("File operations")),
 				"menu": (self.setup, _("Setup")),
-				"eventview": (self.menu, _("More")),
+				"eventview": (self.showReviews, _("Reviews")),
 				"showMovies": (self.showTrailer, _("Show Trailer"))
 			}, -1)
 
-		self['searchinfo'] = Label(_("TMDb: ") + _("Loading..."))
+		self['searchinfo'] = Label(_("TMDB: ") + _("Loading..."))
 		self['genre'] = Label("-")
 		self['genre_txt'] = Label(_("Genre:"))
-		self['description'] = ScrollLabel("")
 		self['fulldescription'] = ScrollLabel("")
 		self['rating'] = Label("0.0")
 		self['votes'] = Label("-")
 		self['votes_brackets'] = Label("")
 		self['votes_txt'] = Label(_("Votes:"))
+		self['fsk'] = Label()
 		self['runtime'] = Label("-")
 		self['runtime_txt'] = Label(_("Runtime:"))
-		self['fsk'] = Label("FSK: ?")
-		self['subtitle'] = Label("-")
 		self['year'] = Label("-")
 		self['year_txt'] = Label(_("Year:"))
 		self['country'] = Label("-")
@@ -542,24 +629,22 @@ class tmdbScreenMovie(Screen, HelpableScreen, CoverHelper):
 		self['key_blue'] = Label(_("More"))
 		self["key_menu"] = StaticText(_("MENU"))  # auto menu button
 		CoverHelper.__init__(self, True, True)
-		print("[TMDb][tmdbScreenMovie] entered")
+		print("[TMDB][tmdbScreenMovie] entered")
 		self.onLayoutFinish.append(self.onFinish)
 
 	def onFinish(self):
 		if self.movie:
-			self['key_yellow'].setText(" ")
+			self['key_yellow'].setText("")
 		if self.saveFilename == "":
-			self['key_blue'].setText(" ")
-		# TMDb read
-		print(f"[TMDb] Selected: {self.mname}")
+			self['key_blue'].setText("")
+		# TMDB read
+		print(f"[TMDB] Selected: {self.mname}")
 		self.showCover(self.coverName)
 		self.getBackdrop(self.url_backdrop)
 		callInThread(self.tmdbSearch)
 
 	def menu(self):
-		if self.saveFilename == "":
-			pass
-		else:
+		if self.saveFilename:
 			options = [
 				(_("Save movie description"), 1),
 				(_("Delete movie EIT file"), 2),
@@ -575,90 +660,64 @@ class tmdbScreenMovie(Screen, HelpableScreen, CoverHelper):
 
 	def menuCallback(self, ret):
 		if ret is None:
-			pass
-		elif ret[1] == 1:
+			return
+		if ret[1] in (1, 5, 6, 7, 8):
 			self.createTXT()
-		elif ret[1] == 2:
+		if ret[1] in (2, 5, 7, 8):
 			self.deleteEIT()
-		elif ret[1] == 3:
+		if ret[1] in (3, 6, 7, 8, 9):
 			self.saveCover()
-		elif ret[1] == 4:
+		if ret[1] in (4, 8, 9):
 			self.saveBackdrop()
-		elif ret[1] == 5:
-			self.createTXT()
-			self.deleteEIT()
-		elif ret[1] == 6:
-			self.createTXT()
-			self.saveCover()
-		elif ret[1] == 7:
-			self.createTXT()
-			self.deleteEIT()
-			self.saveCover()
-		elif ret[1] == 8:
-			self.createTXT()
-			self.deleteEIT()
-			self.saveCover()
-			self.saveBackdrop()
-		elif ret[1] == 9:
-			self.saveCover()
-			self.saveBackdrop()
-		else:
-			pass
 
 	def keyLeft(self):
-		self['description'].pageUp()
 		self['fulldescription'].pageUp()
 
 	def keyRight(self):
-		self['description'].pageDown()
 		self['fulldescription'].pageDown()
 
 	def tmdbSearch(self):
 		self.lang = config.plugins.tmdb.lang.value
-		self['searchinfo'].setText(_("TMDb: ") + _("Loading..."))
-		print("[TMDb][tmdbScreenMovie]1 ID, self.movie: ", self.id, "   ", self.movie)
+		self['searchinfo'].setText(_("TMDB: ") + _("Loading..."))
+		print("[TMDB][tmdbScreenMovie]1 ID, self.movie: ", self.id, "   ", self.movie)
 
 		videos = None
 		try:
+			append = "credits,"
+			if TrailerSupport:
+				append += "videos,"
 			if self.movie:
-				json_data = tmdb.Movies(self.id).info(language=self.lang)
-# print("[TMDb][tmdbScreenMovie] Movie json_data", json_data)
-				if json_data and json_data['overview'] == "":
-					json_data = tmdb.Movies(self.id).info(language="en")
-				json_data_cast = tmdb.Movies(self.id).credits(language=self.lang)
-# print("[TMDb][tmdbScreenMovie] Movie json_data_cast", json_data_cast)
-				json_data_fsk = tmdb.Movies(self.id).releases(language=self.lang)
-# print("[TMDb][tmdbScreenMovie] Movie json_fsk", json_data_fsk)
-				if TrailerSupport:
-					videos = tmdb.Movies(self.id).videos(language=self.lang)
-					# print("[TMDb][tmdbScreenMovie] Movie videos", videos)
+				fsk = "releases"
+				api = tmdb.Movies(self.id)
 			else:
-				json_data = tmdb.TV(self.id).info(language=self.lang)
-				if json_data and json_data['overview'] == "":
-					json_data = tmdb.TV(self.id).info(language="en")
-# print("[TMDb][tmdbScreenMovie] TV json_data", json_data)
-				json_data_cast = tmdb.TV(self.id).credits(language=self.lang)
-# print("[TMDb][tmdbScreenMovie] TV json_data_cast", json_data_cast)
-				json_data_fsk = tmdb.TV(self.id).content_ratings(language=self.lang)
-# print("[TMDb][tmdbScreenMovie] TV json_fsk", json_data_fsk)
-				if TrailerSupport:
-					videos = tmdb.TV(self.id).videos(language=self.lang)
-					# print("[TMDb][tmdbScreenMovie] TV videos", videos)
-			self['searchinfo'].setText(f"{self.mname}")
+				fsk = "content_ratings"
+				api = tmdb.TV(self.id)
+			append += fsk
+			self.info = json_data = api.info(language=self.lang, append_to_response=append)
+			# print("[TMDB][tmdbScreenMovie] json_data", json_data)
+			self.credits = json_data_cast = json_data['credits']
+			# print("[TMDB][tmdbScreenMovie] json_data_cast", json_data_cast)
+			json_data_fsk = json_data[fsk]
+			# print("[TMDB][tmdbScreenMovie] json_fsk", json_data_fsk)
+			if TrailerSupport:
+				videos = json_data['videos']
+				# print("[TMDB][tmdbScreenMovie] videos", videos)
+			if json_data['overview'] == "" and self.lang != "en":
+				json_data = api.info(language="en")
+			self['searchinfo'].setText(self.mname)
 		except Exception as e:
-			print("[TMDb][tmdbScreenMovie]1 tmdb read fail", e)
-			self['searchinfo'].setText(_("TMDb: ") + _("No results found, or does not respond!"))
+			print("[TMDB][tmdbScreenMovie]1 tmdb read fail", e)
+			self['searchinfo'].setText(_("TMDB: ") + _("No results found, or does not respond!"))
 			return
-		year = vote_average = vote_count = runtime = country_string = genre_string = subtitle = cast_string = ""
+		year = vote_average = vote_count = runtime = country_string = genre_string = subtitle = cast_string = season = ""
 		crew_string = director = author = studio_string = ""
 
 		self.trailer = videos["results"] if TrailerSupport and videos else None
 
 		# Year
-
 		if 'release_date' in json_data:
-			year = json_data['release_date'][:+4]
-			self['year'].setText(f"{str(year)}")
+			year = json_data['release_date'][:4]
+			self['year'].setText(year)
 
 		# Rating
 		if 'vote_average' in json_data:
@@ -667,55 +726,57 @@ class tmdbScreenMovie(Screen, HelpableScreen, CoverHelper):
 
 		# Votes
 		if 'vote_count' in json_data:
-			vote_count = json_data['vote_count']
-			self['votes'].setText(f"{str(vote_count)}")
-			self['votes_brackets'].setText(f"({str(vote_count)})")
+			vote_count = str(json_data['vote_count'])
+			self['votes'].setText(vote_count)
+			self['votes_brackets'].setText(f"({vote_count})")
 
 		# Runtime
-		if 'runtime' in json_data:
-			runtime = json_data['runtime']
-			self['runtime'].setText(f"{str(runtime)} min.")
-			runtime = f", {runtime} min."
+		if 'runtime' in json_data and json_data['runtime']:
+			runtime = f"{json_data['runtime']} min."
+			self['runtime'].setText(runtime)
 
 		# Country
 		if 'production_countries' in json_data:
 			for country in json_data['production_countries']:
 				country_string += f"{country['iso_3166_1']}/"
 			country_string = country_string[:-1]
-			self['country'].setText(f"{str(country_string)}")
+			self['country'].setText(country_string)
 
 		# Genre"
 		if 'genres' in json_data:
 			# genre_count = len(json_data['genres'])
 			for genre in json_data['genres']:
 				genre_string += f"{genre['name']}, "
-			self['genre'].setText(f"{str(genre_string[:-2])}")
+			genre_string = genre_string[:-2]
+			self['genre'].setText(genre_string)
 
 		# Subtitle
 		if 'tagline' in json_data:
 			subtitle = json_data['tagline']
-			if json_data['tagline'] == "":
-				subtitle = ""
-			else:
-				self['subtitle'].setText(f"{str(subtitle)}")
-				subtitle = f"{subtitle}\n"
 
 		# Cast
 		if 'cast' in json_data_cast:
 			for cast in json_data_cast['cast']:
 				castx = cast['name'] if cast['character'] == "" else f"{cast['name']} ({cast['character']})"
 				cast_string += f"{castx}\n"
+			cast_string = cast_string[:-1]
+			if cast_string:
+				cast_string = f"{highlightText(_('Cast'))}\n{cast_string}"
 
 		# Crew
-
 		if 'crew' in json_data_cast:
 			for crew in json_data_cast['crew']:
-				crew_string += f"{crew['name']} ({crew['job']})\n"
+				crew_name = crew['name']
+				crew_job = crew['job']
+				crew_string += f"{crew_name} ({crew_job})\n"
 
-				if crew['job'] == "Director":
-					director += f"{crew['name']}, "
-				if crew['job'] == "Screenplay" or crew['job'] == "Writer":
-					author += f"{crew['name']}, "
+				if crew_job == "Director":
+					director += f"{crew_name}, "
+				if crew_job == "Screenplay" or crew_job == "Writer":
+					author += f"{crew_name}, "
+			crew_string = crew_string[:-1]
+			if crew_string:
+				crew_string = f"{highlightText(_('Crew'))}\n{crew_string}"
 			director = director[:-2]
 			author = author[:-2]
 			self['director'].setText(director)
@@ -731,13 +792,13 @@ class tmdbScreenMovie(Screen, HelpableScreen, CoverHelper):
 		#
 		# modify Data for TV/Series
 		#
-		season = year = country_string = director = studio_string = runtime = episodes = ""
-
 		if not self.movie:
+			year = country_string = director = studio_string = runtime = episodes = ""
+
 			# Year
 			if 'first_air_date' in json_data:
-				year = json_data['first_air_date'][:+4]
-				self['year'].setText(f"{str(year)}")
+				year = json_data['first_air_date'][:4]
+				self['year'].setText(year)
 
 			# Country
 			if 'origin_country' in json_data:
@@ -764,45 +825,81 @@ class tmdbScreenMovie(Screen, HelpableScreen, CoverHelper):
 			# Runtime
 			seasons = json_data.get("number_of_seasons", "")
 			episodes = json_data.get("number_of_episodes", "")
-			runtime = f"{seasons} {_('Seasons')} / {episodes} {_('Episodes')}"
-			self['runtime'].setText(f"{runtime}")
-			runtime = f", {runtime}"
+			runtime = f"{seasons} {_s('Season', 'Seasons', seasons)} / {episodes} {_s('Episode', 'Episodes', episodes)}"
+			self['runtime'].setText(runtime)
 
 			# Series Description
 			if 'seasons' in json_data:
 				for seasons in json_data['seasons']:
 					if seasons['season_number'] >= 1:
-						season += f"{_('Season')} {seasons['season_number']} / {seasons['episode_count']} ({seasons['air_date'][:4]})\n"
+						syear = str(seasons['air_date'])[:7]
+						syear = "" if syear == "None" else f" ({syear})"
+						season += f"{_('Season')} {seasons['season_number']} / {seasons['episode_count']}{syear}\n"
+				if season:
+					season = f"{highlightText(_('Seasons'))}\n{season}"
 
 		# Description
-		description = ""
-		if 'overview' in json_data:
-			description = json_data['overview']
-			description = f"{description}\n\n{cast_string}\n{crew_string}"
-			self['description'].setText(description)
+		description = json_data['overview']
+		description = [info for info in (description, cast_string, crew_string) if info]
+		description = "\n\n".join(description)
 
-			movieinfo = f"{str(genre_string)}{str(country_string)} {str(year)} {str(runtime)}"
-			fulldescription = f"{subtitle}{movieinfo}\n\n{description}\n{season}"
-			self['fulldescription'].setText(fulldescription)
-			self.text = fulldescription
+		movieinfo = [info for info in (genre_string, country_string, year, runtime) if info]
+		movieinfo = ", ".join(movieinfo)
+
+		fulldescription = [info for info in (subtitle, movieinfo, description, season) if info]
+		fulldescription = "\n\n".join(fulldescription)
+		self['fulldescription'].setText(fulldescription)
+		self.text = fulldescription
 
 		# FSK
-		fsk = "100"
+		fsk = None
+		aus = None
+		ages = []
+		fsk_text = None
 		if self.movie:
-			if 'countries' in json_data_fsk:
-				for country in json_data_fsk['countries']:
-					if str(country['iso_3166_1']) == "DE":
-						fsk = str(country['certification'])
+			key1 = 'countries'
+			key2 = 'certification'
 		else:
-			if 'results' in json_data_fsk:
-				for country in json_data_fsk['results']:
-					if str(country['iso_3166_1']) == "DE":
-						fsk = str(country['rating'])
-
-		self.showFSK(fsk)
-
-	def dataError(self, error):
-		print(f"[TMDb] Error: {error}")
+			key1 = 'results'
+			key2 = 'rating'
+		if key1 in json_data_fsk:
+			for country in json_data_fsk[key1]:
+				c = str(country['iso_3166_1'])
+				val = country[key2]
+				if c == "DE":
+					fsk = val
+				elif c == "AU":
+					aus = val.lower().replace(" ", "").replace("+", "")
+					break
+				else:
+					try:
+						ages.append(int(search(r'\d+', val).group(0)))
+					except Exception:
+						pass
+		if fsk:
+			fsk = f"fsk_{fsk}"
+		elif aus:
+			fsk = f"aus_{aus}"
+		elif ages:
+			# Take the median age.
+			ages.sort()
+			fsk = f"age_{ages[len(ages) // 2]}"
+		else:
+			if 'origin_country' in json_data and json_data['origin_country']:
+				origin = json_data['origin_country'][0]
+				for country in json_data_fsk[key1]:
+					c = str(country['iso_3166_1'])
+					val = country[key2]
+					if val and (not fsk_text or c == origin or c == "US"):
+						fsk_text = f"{val}\n({c})"
+						if c == origin:
+							break
+				if fsk_text:
+					self['fsk'].setText(fsk_text)
+				else:
+					fsk = "fsk_100"
+		if fsk:
+			self.showFSK(fsk)
 
 	def playTrailer(self, url):
 		if url:
@@ -814,7 +911,7 @@ class tmdbScreenMovie(Screen, HelpableScreen, CoverHelper):
 					if result and result.get("url"):
 						url = result["url"]
 				except Exception as e:
-					print(f"[TMDb] YoutubeDLP Error: {e}")
+					print(f"[TMDB] YoutubeDLP Error: {e}")
 			elif YoutubeDL:
 				try:
 					ydl = YoutubeDL({'format': 'best'})
@@ -822,7 +919,7 @@ class tmdbScreenMovie(Screen, HelpableScreen, CoverHelper):
 					if result and hasattr(result, "url"):
 						url = result['url']
 				except Exception as e:
-					print(f"[TMDb] YoutubeDL Error: {e}")
+					print(f"[TMDB] YoutubeDL Error: {e}")
 			if url:
 				from Screens.InfoBar import MoviePlayer
 				sref = eServiceReference(4097, 0, url)
@@ -850,25 +947,23 @@ class tmdbScreenMovie(Screen, HelpableScreen, CoverHelper):
 			self.decodeCover(coverName)
 
 	def getBackdrop(self, url_backdrop):
-		backdropSaved = f"{tempDir}backdrop.jpg"
+		backdropSaved = self.backdropName()
 		if exists(backdropSaved):
-			remove(backdropSaved)
-		if url_backdrop.endswith("None"):
-			print("[TMDb] No backdrop found")
+			self.decodeBackdrop(backdropSaved)
+		elif url_backdrop.endswith("None"):
+			print("[TMDB] No backdrop found")
 		else:
-			callInThread(threadDownloadPage, url_backdrop, f"{tempDir}backdrop.jpg", boundFunction(self.gotBackdrop, f"{tempDir}backdrop.jpg"), self.dataError)
+			callInThread(threadDownloadPage, url_backdrop, backdropSaved, self.gotBackdrop, self.dataError)
 
-	def gotBackdrop(self, backdrop, *args, **kwargs):
+	def gotBackdrop(self, backdrop, url_backdrop):
 		# print("Backdrop download returned", backdrop)
-		backdropSaved = f"{tempDir}backdrop.jpg"
-		if not exists(backdropSaved):
-			pass
+		self.showBackdrop()
 
-		if exists(f"{tempDir}backdrop.jpg"):
-			self.decodeBackdrop(f"{tempDir}backdrop.jpg")
+	def dataError(self, error, url_backdrop):
+		print(f"[TMDB] Error: {error}")
 
 	def showFSK(self, fsk):
-		self.fsklogo = f"/usr/lib/enigma2/python/Plugins/Extensions/tmdb/pic/fsk_{fsk}.png"
+		self.fsklogo = f"/usr/lib/enigma2/python/Plugins/Extensions/tmdb/pic/{fsk}.png"
 		self.decodeFsk(self.fsklogo)
 
 	def ok(self):
@@ -879,10 +974,13 @@ class tmdbScreenMovie(Screen, HelpableScreen, CoverHelper):
 
 	def keyYellow(self):
 		if not self.movie:
-			self.session.open(tmdbScreenSeason, self.mname, self.id, self.media)
+			self.session.open(tmdbScreenSeason, self.mname, self.id, self.media, self.info)
 
 	def keyGreen(self):
-		self.session.open(tmdbScreenPeople, self.mname, self.id, self.media)
+		self.session.open(tmdbScreenPeople, self.mname, self.id, self.media, self.credits, self.info)
+
+	def showReviews(self):
+		self.session.open(tmdbScreenReviews, self.mname, self.id, self.media)
 
 	def cancel(self):
 		self.close(True)
@@ -900,15 +998,15 @@ class tmdbScreenMovie(Screen, HelpableScreen, CoverHelper):
 
 				shutil.copy(self.coverName, f"{saveFile}.jpg")
 				self.session.open(MessageBox, _("Cover saved!"), type=1, timeout=3)
-				print(f"[TMDb] Cover {saveFile}.jpg created")
+				print(f"[TMDB] Cover {saveFile}.jpg created")
 			except Exception:
-				print("[TMDb] Error saving cover!")
+				print("[TMDB] Error saving cover!")
 
 	def saveBackdrop(self):
 		saveFile = cleanEnd(self.saveFilename)
 		if exists(self.saveFilename):
 			try:
-				backdropName = f"{tempDir}backdrop.jpg"
+				backdropName = self.backdropName()
 				if config.plugins.tmdb.backdropQuality.value != "original":
 					width, height = config.plugins.tmdb.backdropQuality.value.split("x", 1)
 					img = Image.open(backdropName)
@@ -918,9 +1016,9 @@ class tmdbScreenMovie(Screen, HelpableScreen, CoverHelper):
 
 				shutil.copy(backdropName, f"{saveFile}.bdp.jpg")
 				self.session.open(MessageBox, _("Backdrop saved!"), type=1, timeout=3)
-				print(f"[TMDb] Backdrop {saveFile}.bdp.jpg created")
+				print(f"[TMDB] Backdrop {saveFile}.bdp.jpg created")
 			except Exception:
-				print("[TMDb] Error saving backdrop!")
+				print("[TMDB] Error saving backdrop!")
 
 	def createTXT(self):
 		saveFile = cleanEnd(self.saveFilename)
@@ -928,34 +1026,33 @@ class tmdbScreenMovie(Screen, HelpableScreen, CoverHelper):
 			try:
 				with open(f"{saveFile}.txt", "w") as fd:
 					fd.write(self.text)
-				print(f"[TMDb] {saveFile}.txt created")
+				print(f"[TMDB] {saveFile}.txt created")
 				self.session.open(MessageBox, _("Movie description saved!"), type=1, timeout=3)
 			except OSError:
-				print("[TMDb] Error saving TXT file!")
+				print("[TMDB] Error saving TXT file!")
 
 	def deleteEIT(self):
 		eitFile = f"{cleanEnd(self.saveFilename)}.eit"
 		try:
 			remove(eitFile)
-			print(f"[TMDb] {eitFile} deleted")
+			print(f"[TMDB] {eitFile} deleted")
 			self.session.open(MessageBox, _("EIT file deleted!"), type=1, timeout=3)
 		except OSError:
-			print("[TMDb] Error deleting EIT file!")
+			print("[TMDB] Error deleting EIT file!")
 
 
 class tmdbScreenPeople(Screen, HelpableScreen, CoverHelper):
 	skin = tmdbScreenPeopleSkin
 
-	def __init__(self, session, mname, fid, media):
+	def __init__(self, session, mname, fid, media, credits=None, info=None):
 		Screen.__init__(self, session)
 		self.mname = mname
 		self.id = fid
 		self.media = media
-		if self.media == "movie":
-			self.movie = True
-		else:
-			self.movie = False
-		self.covername = noCover
+		self.movie = self.media == "movie"
+		self.credits = credits
+		self.info = info
+		self.covername = noCoverP
 
 		HelpableScreen.__init__(self)
 		self["actions"] = HelpableActionMap(self, "TMDbActions",
@@ -964,21 +1061,18 @@ class tmdbScreenPeople(Screen, HelpableScreen, CoverHelper):
 				"cancel": (self.cancel, _("Exit")),
 				"down": (self.keyDown, _("Selection down")),
 				"up": (self.keyUp, _("Selection up")),
-				"nextBouquet": (self.chDown, _("Details down")),
-				"prevBouquet": (self.chUp, _("Details up")),
 				"right": (self.keyRight, _("Page down")),
-				"left": (self.keyLeft, _("Page down")),
+				"left": (self.keyLeft, _("Page up")),
 				"red": (self.cancel, _("Exit")),
 				"green": (self.ok, _("Show details")),
-				"blue": (self.keyBlue),
+				"blue": (self.keyBlue, _("Setup")),
 				"menu": (self.keyBlue, _("Setup"))
 			}, -1)
 
-		self['searchinfo'] = Label(_("TMDb: ") + _("Loading..."))
-		self['data'] = ScrollLabel("")
+		self['searchinfo'] = Label(_("TMDB: ") + _("Loading..."))
 		self['key_red'] = Label(_("Exit"))
 		self['key_green'] = Label(_("Details"))
-		self['key_blue'] = Label()
+		self['key_blue'] = Label(_("Setup"))
 		self["key_menu"] = StaticText(_("MENU"))  # auto menu button
 		self['list'] = createList()
 		CoverHelper.__init__(self, True)
@@ -986,123 +1080,150 @@ class tmdbScreenPeople(Screen, HelpableScreen, CoverHelper):
 		self.onLayoutFinish.append(self.onFinish)
 
 	def onFinish(self):
-		# TMDb read
-		print(f"[TMDb] Selected: {self.mname}")
-		self['searchinfo'].setText(f"{self.mname}")
+		# TMDB read
+		print("[TMDB] Selected: {self.mname}")
 		self.showBackdrop()
 		callInThread(self.tmdbSearch)
 
 	def tmdbSearch(self):
+		self.list = []
+		self.seasons_cast = []
 		json_data_cast = []
 		json_data_seasons = []
 		json_data_season = []
 		self.lang = config.plugins.tmdb.lang.value
-		self['searchinfo'].setText(_("TMDb: ") + _("Loading..."))
-		res = []
+		self['searchinfo'].setText(_("TMDB: ") + _("Loading..."))
 		try:
-			if self.movie:
+			if self.credits:
+				json_data_cast = self.credits
+			elif self.movie:
 				json_data_cast = tmdb.Movies(self.id).credits(language=self.lang)
-				# print(json_data_cast)
 			else:
 				json_data_cast = tmdb.TV(self.id).credits(language=self.lang)
 		except Exception as e:
-			print("[TMDb][tmdbScreenMovie]2 tmdb read fail", e)
-			self['searchinfo'].setText(_("TMDb: ") + _("No results found, or does not respond!"))
+			print("[TMDB][tmdbScreenMovie]2 tmdb read fail", e)
+			self['searchinfo'].setText(_("TMDB: ") + _("No results found, or does not respond!"))
 			return
 		if "cast" in json_data_cast and json_data_cast["cast"] is not None:
-# print("json_data_cast", json_data_cast)
+			# print("json_data_cast", json_data_cast)
 			for casts in json_data_cast['cast']:
 				title = date = ""
-# print("json_data_cast - casts", casts)
+				# print("json_data_cast - casts", casts)
 				fid = str(casts['id'])
 				title = casts['name'] if casts['character'] == "" else f"{casts['name']} ({casts['character']})"
 				coverPath = casts['profile_path']
-				# cover = f"{tempDir}{fid}.jpg"
-				url_cover = f"http://image.tmdb.org/t/p/{config.plugins.tmdb.themoviedb_coversize.value}/{coverPath}"
+				url_cover = self.imageURL(coverPath)
 
 				if fid != "" or title != "":
-					res.append(((title, url_cover, "", fid, None),))
+					self.list.append([None, ((title, url_cover, fid, None),)])
 
 			if not self.movie:
 				try:
-					json_data_seasons = tmdb.TV(self.id).info(language=self.lang)
+					json_data_seasons = self.info if self.info else tmdb.TV(self.id).info(language=self.lang)
 				except Exception as e:
-					print("[TMDb][tmdbScreenMovie]3 tmdb json_data_seasons = tmdb.TV(self.id).info", e)
-					self['searchinfo'].setText(_("TMDb: ") + _("No results found, or does not respond!"))
+					print("[TMDB][tmdbScreenMovie]3 tmdb json_data_seasons = tmdb.TV(self.id).info", e)
+					self['searchinfo'].setText(_("TMDB: ") + _("No results found, or does not respond!"))
 					return
 				if json_data_seasons:
-					seasoncnt = 1
+					total = len(json_data_seasons['seasons'])
+					progress = total > 1
+					if progress:
+						count = 1
+						loading = _("TMDB: ") + _("Loading...")
+					self.list.append([None, (None,)])
 					for season in json_data_seasons['seasons']:
-						date = " "
+						if progress:
+							self['searchinfo'].setText(f"{loading} ({count}/{total})")
+							count += 1
+						date = ""
 						# print"######", season
 						seasoncnt = season['season_number']
 						# print"#########", str(season['season_number'])
 						# fid = str(season['id'])
 						title = season['name']
 						if season['air_date'] is not None:
-							date = f"({season['air_date'][:4]})"
-						res.append(((f"{title} {date}", "None", "", None, None),))
+							date = f" ({season['air_date'][:7]})"
+						season_cast = []
 						json_data_season = tmdb.TV_Seasons(self.id, seasoncnt).credits(language=self.lang)
 						if json_data_season:
+							title += f" / {len(json_data_season['cast'])}"
 							for casts in json_data_season['cast']:
 								fid = str(casts['id'])
-								title = casts['name'] if casts['character'] == "" else f"{casts['name']} ({casts['character']})"
-								coverPath = str(casts['profile_path'])
-								# cover = f"{tempDir}{fid}.jpg"
-								url_cover = f"http://image.tmdb.org/t/p/{config.plugins.tmdb.themoviedb_coversize.value}/{coverPath}"
-
-								if fid != "" or title != "":
-									res.append(((f"    {title}", url_cover, "", fid, None),))
-			if res:
-				self['list'].setList(res)
-				self.piclist = res
-				self.getInfo()
-				self['searchinfo'].setText(f"{self.mname}")
+								name = casts['name'] if casts['character'] == "" else f"{casts['name']} ({casts['character']})"
+								coverPath = casts['profile_path']
+								url_cover = self.imageURL(coverPath)
+								season_cast.append(((f"    {name}", url_cover, fid, None),))
+						coverPath = season['poster_path']
+						url_cover = self.imageURL(coverPath)
+						fid = str(season['id'])
+						self.list.append([False, ((title + date, url_cover, fid, len(self.list)),)])
+						self.seasons_cast.append(season_cast)
+			if self.list:
+				self.setList()
+				self['searchinfo'].setText(self.mname)
 			else:
-				self['searchinfo'].setText(_("TMDb: ") + _("No results found"))
+				self['searchinfo'].setText(_("TMDB: ") + _("No results found"))
 		else:
-			self['searchinfo'].setText(_("TMDb: ") + _("No results found, or does not respond!"))
+			self['searchinfo'].setText(_("TMDB: ") + _("No results found, or does not respond!"))
+
+	def setList(self):
+		res = []
+		season = 0
+		for expanded, entry in self.list:
+			res.append(entry)
+			if expanded is not None:
+				if expanded:
+					res += self.seasons_cast[season]
+				season += 1
+		self['list'].setList(res)
+		self.getInfo()
 
 	def getInfo(self):
-		self['data'].setText("")
-		url_cover = self['list'].getCurrent()[1]
-		fid = self['list'].getCurrent()[3]
-
+		check = self['list'].getCurrent()
+		url_cover = check[1]
 		if url_cover.endswith("None"):
-			self.showCover(noCover)
+			self.showCover(noCoverP)
 		else:
-			fileName = f"{tempDir}{fid}.jpg"
+			fid = check[2]
+			if check[3] is None:
+				fileName = f"{tempDir}person-{fid}.jpg"
+			else:
+				fileName = f"{tempDir}{self.media}-{self.id}-{fid}.jpg"
 			if not exists(fileName):
-				callInThread(threadDownloadPage, url_cover, fileName, boundFunction(self.getData, fileName), self.dataError)
+				self.delayDownload(url_cover, fileName, self.getData, self.dataError)
 			else:
 				self.showCover(fileName)
+		if check[3] is None:
+			state = _("Details")
+		else:
+			state = self.list[check[3]][0] and _("Collapse") or _("Expand")
+		self['key_green'].setText(state)
 
-	def getData(self, coverSaved, *args, **kwargs):
-		self.showCover(coverSaved)
+	def getData(self, coverSaved, url_cover):
+		if 'list' in self and url_cover == self['list'].getCurrent()[1]:
+			self.showCover(coverSaved)
 
-	def dataError(self, error):
-		print(f"[TMDb] Error: {error}")
+	def dataError(self, error, url_cover):
+		print(f"[TMDB] Error: {error}")
+		self.getData(noCoverP, url_cover)
 
 	def showCover(self, coverName):
 		if not exists(coverName):
-			coverName = noCover
+			coverName = noCoverP
 
 		if exists(coverName):
 			self.decodeCover(coverName)
 		self.covername = coverName
 
-	def showBackdrop(self):
-		backdropSaved = f"{tempDir}backdrop.jpg"
-		if exists(backdropSaved):
-			self.decodeBackdrop(backdropSaved)
-
 	def ok(self):
 		check = self['list'].getCurrent()
-		if check is not None and check[3] is not None:
-			fid = self['list'].getCurrent()[3]
-			self.session.open(tmdbScreenPerson, self.covername, fid)
-		else:
-			self['searchinfo'].setText(_("TMDb: ") + _("No cast details found"))
+		if check is not None:
+			if check[3] is None:
+				fid = check[2]
+				self.session.open(tmdbScreenPerson, self.covername, fid, self.id, self.media)
+			else:
+				self.list[check[3]][0] ^= True
+				self.setList()
 
 	def keyLeft(self):
 		check = self['list'].getCurrent()
@@ -1128,12 +1249,6 @@ class tmdbScreenPeople(Screen, HelpableScreen, CoverHelper):
 			self['list'].up()
 			self.getInfo()
 
-	def chDown(self):
-		self['data'].pageUp()
-
-	def chUp(self):
-		self['data'].pageDown()
-
 	def keyBlue(self):
 		self.session.open(tmdbConfigScreen)
 
@@ -1144,10 +1259,12 @@ class tmdbScreenPeople(Screen, HelpableScreen, CoverHelper):
 class tmdbScreenPerson(Screen, HelpableScreen, CoverHelper):
 	skin = tmdbScreenPersonSkin
 
-	def __init__(self, session, coverName, fid):
+	def __init__(self, session, coverName, fid, tid, media):
 		Screen.__init__(self, session)
 		self.coverName = coverName
-		self.id = fid
+		self.pid = fid
+		self.id = tid
+		self.media = media
 
 		HelpableScreen.__init__(self)
 		self["actions"] = HelpableActionMap(self, "TMDbActions",
@@ -1158,11 +1275,13 @@ class tmdbScreenPerson(Screen, HelpableScreen, CoverHelper):
 				"left": (self.keyLeft, _("Page up")),
 				"right": (self.keyRight, _("Page down")),
 				"red": (self.cancel, _("Exit")),
+				"yellow": (self.keyYellow, _("List shows as search results")),
 			}, -1)
 
-		self['searchinfo'] = Label(_("TMDb: ") + _("Loading..."))
+		self['searchinfo'] = Label(_("TMDB: ") + _("Loading..."))
 		self['fulldescription'] = ScrollLabel("")
 		self['key_red'] = Label(_("Exit"))
+		self['key_yellow'] = Label(_("List"))
 		CoverHelper.__init__(self, True)
 
 		self.onLayoutFinish.append(self.onFinish)
@@ -1179,106 +1298,130 @@ class tmdbScreenPerson(Screen, HelpableScreen, CoverHelper):
 		self['fulldescription'].pageDown()
 
 	def tmdbSearch(self):
+		self.list = {}
 		self.lang = config.plugins.tmdb.lang.value
-		print(f"[TMDb] ID: {self.id}")
-		self['searchinfo'].setText(_("TMDb: ") + _("Loading..."))
+		print(f"[TMDB] ID: {self.pid}")
+		self['searchinfo'].setText(_("TMDB: ") + _("Loading..."))
 		try:		# may be invalid id
-			json_data_person = tmdb.People(self.id).info(language=self.lang)
+			json_data_person = tmdb.People(self.pid).info(language=self.lang, append_to_response="combined_credits")
 		except Exception as e:
-			print(f"[TMDb] 4 tmdb.People(self.id).inf {e}")
-			self['searchinfo'].setText(_("TMDb: ") + _("No results found, or does not respond!"))
+			print(f"[TMDB] 4 tmdb.People(self.pid).info {e}")
+			self['searchinfo'].setText(_("TMDB: ") + _("No results found, or does not respond!"))
+			self['key_yellow'].setText("")
 			return
 		if json_data_person:
-# print("[TMDb]", json_data_person)
+			# print("[TMDB]", json_data_person)
 			self.mname = json_data_person['name']
 
 			# Personal data
-			birthday = birthplace = gender = altname = rank = biography = ""
+			birthday = deathday = birthplace = gender = altname = rank = biography = ""
 			if "birthday" in json_data_person and json_data_person['birthday'] is not None:
 				birthday = json_data_person['birthday']
-
+			if "deathday" in json_data_person and json_data_person['deathday'] is not None:
+				deathday = json_data_person['deathday']
 			if "place_of_birth" in json_data_person and json_data_person['place_of_birth'] is not None:
 				birthplace = json_data_person['place_of_birth']
 			if "gender" in json_data_person:
 				gender = json_data_person['gender']
-				if gender == "1":
-					gender = _("female")
-				elif gender == "2":
-					gender = _("male")
-				else:
-					gender = ""
-# print("[TMDb]", json_data_person["also_known_as"])
-			if "also_known_as" in json_data_person and json_data_person["also_known_as"] != []:
-				altname = f"\n{_('Known as: ')}{json_data_person['also_known_as'][0]}"
+				gender = ["", _("Female"), _("Male"), _("Non-binary")][gender]
+			# print("[TMDB]", json_data_person["also_known_as"])
+			if "also_known_as" in json_data_person and json_data_person["also_known_as"]:
+				altname = f"{_('Known as: ')}{json_data_person['also_known_as'][0]}"
 				if len(json_data_person['also_known_as']) > 1:
-					altname = f"{altname}, {json_data_person['also_known_as'][1]}"
-
-			if "popularity'" in json_data_person:
-				rank = f"\n{_('Popularity')}: {json_data_person['popularity']}"
+					altname += f", {json_data_person['also_known_as'][1]}"
 
 			if "biography" in json_data_person:
 				biography = json_data_person['biography']
-			if biography == "":
-					json_data_person = tmdb.People(self.id).info(language='en')
+			if biography == "" and self.lang != "en":
+				json_data_person = tmdb.People(self.pid).info(language="en")
 			if "biography" in json_data_person:
-					biography = json_data_person['biography']
-			birthday = birthday if birthday == "" else _(f"Birthdate:{birthday}, ")
-			birthplace = birthplace if birthplace == "" else _(f"Birthplace:{birthplace}")
-			gender = gender if gender == "" else _(f", Gender:{gender}")
-			print(f"[TMDb] cast person details 1 {birthday}  {birthplace}  {gender}")
-			data = f"{birthday}{birthplace}{gender}{altname}{rank}\n\n{biography}\n\n"
+				biography = json_data_person['biography']
+			info = []
+			age = ""
+			if birthday:
+				born = strptime(birthday, "%Y-%m-%d")
+				stop = strptime(deathday, "%Y-%m-%d") if deathday else localtime()
+				age = stop.tm_year - born.tm_year
+				if stop.tm_mon < born.tm_mon or (stop.tm_mon == born.tm_mon and stop.tm_mday < born.tm_mday):
+					age -= 1
+				age = f" ({age})"
+				info.append(f"{_('Born')}: {birthday}{'' if deathday else age}")
+			if birthplace:
+				info.append(f"{_('Birthplace')}: {birthplace}")
+			if deathday:
+				info.append(f"{_('Died')}: {deathday}{age}")
+			if gender:
+				info.append(f"{_('Gender')}: {gender}")
+			if altname:
+				info.append(altname)
+			if "popularity" in json_data_person:
+				info.append(f"{_('Popularity')}: {json_data_person['popularity']}")
+			data = "\n".join(info)
+			# print(f"[TMDB] cast person details 1 {data})
+			if data and biography:
+				data += "\n\n"
+			data += biography
 			# Participated data
-			json_data_person = tmdb.People(self.id).movie_credits(language=self.lang)
-			json_data_person_tv = tmdb.People(self.id).tv_credits(language=self.lang)
+			json_data_person = json_data_person['combined_credits']
 			data_movies = []
-			# Participated in movies
-# print("[tmdbScreenPerson][tmdbsearch]json_data_person, json_data_person_tv]", json_data_person, "   ", json_data_person_tv)
-			release_date = title = character = first_air_date = name = ""
 			if "cast" in json_data_person:
 				for cast in json_data_person['cast']:
-					if "release_date" in cast:
-						release_date = cast['release_date']
-					if "title" in cast:
+					if cast['media_type'] == "movie":
+						if "release_date" in cast and cast['release_date']:
+							date = cast['release_date']
+						else:
+							date = "????-??-??"
 						title = cast['title']
-					if "character" in cast:
-						character = cast['character']
-					datacm = f"{release_date} {title}  ({character})" if character != "" else f"{release_date} {title}"
-					data_movies.append(datacm)
-# print("[tmdbScreenPerson][tmdbsearch]data_movies]", data_movies)
-			# Participated in TV
-			if "cast" in json_data_person_tv:
-				for cast in json_data_person_tv['cast']:
-					if "first_air_date" in cast:
-						first_air_date = cast['first_air_date']
-					if "name" in cast:
-						name = cast['name']
-					if "character" in cast:
-						character = cast['character']
-					datactv = f"{first_air_date} [name]  ({character}) - TV" if character else f"{first_air_date} {name} - TV"
-					data_movies.append(datactv)
-# print("[tmdbScreenPerson][tmdbsearch]data_movies+TV]", data_movies)
+						char = "character" in cast and cast['character']
+						character = f" ({char})" if char else ""
+					else:
+						if "first_credit_air_date" in cast and cast['first_credit_air_date']:
+							date = cast['first_credit_air_date']
+						elif "first_air_date" in cast and cast['first_air_date']:
+							date = cast['first_air_date']
+						else:
+							date = "????-??-??"
+						title = cast['name']
+						extra = []
+						character = "character" in cast and cast['character']
+						if character:
+							extra.append(character)
+						episodes = "episode_count" in cast and cast['episode_count']
+						if episodes:
+							extra.append(f"{episodes} {_s('episode', 'episodes', episodes)}")
+						character = f" ({'; '.join(extra)})" if extra else ""
+					datac = f"{date} {title}{character}"
+					data_movies.append((datac, cast))
 
 			data_movies.sort(reverse=True)
-			cast_movies = ""
-			for cast in data_movies:
-				cast_movies += f"{cast}\n"
-
-			data = f"{data}\n{_('Known for:')}\n{cast_movies}"
+			data_movies, results = map(list, zip(*data_movies))
+			cast_movies = "\n".join(data_movies)
+			if cast_movies:
+				if data:
+					data += "\n\n"
+				data += f"{highlightText(_('Known acting credits'))}\n{cast_movies}"
 			self['fulldescription'].setText(data)
-			self['searchinfo'].setText(f"{self.mname}")
+			self['searchinfo'].setText(self.mname)
+			if len(results) == 1:
+				self['key_yellow'].setText("")
+			else:
+				self.list = {
+					'results': results,
+					'total_pages': 1
+				}
 		else:
-			self['searchinfo'].setText(_("TMDb: ") + _("No results found, or does not respond!"))
+			self['searchinfo'].setText(_("TMDB: ") + _("No results found, or does not respond!"))
+			self['key_yellow'].setText("")
 
 	def showCover(self, coverName):
 		self.decodeCover(coverName)
 
-	def showBackdrop(self):
-		backdropSaved = f"{tempDir}backdrop.jpg"
-		if exists(backdropSaved):
-			self.decodeBackdrop(backdropSaved)
-
 	def ok(self):
 		self.cancel()
+
+	def keyYellow(self):
+		if self.list:
+			self.session.open(tmdbScreen, text=self.mname, results=self.list, keepTemp=True)
 
 	def cancel(self):
 		self.close(True)
@@ -1287,36 +1430,36 @@ class tmdbScreenPerson(Screen, HelpableScreen, CoverHelper):
 class tmdbScreenSeason(Screen, HelpableScreen, CoverHelper):
 	skin = tmdbScreenSeasonSkin
 
-	def __init__(self, session, mname, fid, media):
+	def __init__(self, session, mname, fid, media, info):
 		Screen.__init__(self, session)
 		self.mname = mname
 		self.id = fid
 		self.media = media
 		self.movie = self.media == "movie"
-		self.piclist = ""
+		self.info = info
 
 		HelpableScreen.__init__(self)
 		self["actions"] = HelpableActionMap(self, "TMDbActions",
 			{
-				"ok": (self.ok, _("Show details")),
+				"ok": (self.ok, _("Expand/collapse season")),
 				"cancel": (self.cancel, _("Exit")),
 				"up": (self.keyUp, _("Selection up")),
 				"down": (self.keyDown, _("Selection down")),
-				"nextBouquet": (self.chDown, _("Details down")),
-				"prevBouquet": (self.chUp, _("Details up")),
+				"prevBouquet": (self.chDown, _("Details down")),
+				"nextBouquet": (self.chUp, _("Details up")),
 				"right": (self.keyRight, _("Page down")),
-				"left": (self.keyLeft, _("Page down")),
+				"left": (self.keyLeft, _("Page up")),
 				"red": (self.cancel, _("Exit")),
-				"green": (self.ok, _(" ")),
-				"blue": (self.keyBlue),
+				"green": (self.ok, _("Expand/collapse season")),
+				"blue": (self.keyBlue, _("Setup")),
 				"menu": (self.keyBlue, _("Setup"))
 			}, -1)
 
-		self['searchinfo'] = Label(_("TMDb: ") + _("Loading..."))
+		self['searchinfo'] = Label(_("TMDB: ") + _("Loading..."))
 		self['data'] = ScrollLabel("")
 		self['key_red'] = Label(_("Exit"))
-		self['key_green'] = Label()
-		self['key_blue'] = Label()
+		self['key_green'] = Label(_("Expand"))
+		self['key_blue'] = Label(_("Setup"))
 		self['list'] = createList()
 
 		CoverHelper.__init__(self, True)
@@ -1324,99 +1467,118 @@ class tmdbScreenSeason(Screen, HelpableScreen, CoverHelper):
 		self.onLayoutFinish.append(self.onFinish)
 
 	def onFinish(self):
-		# TMDb read
-		print(f"[TMDb] Selected: {self.mname}")
-		self['searchinfo'].setText(f"{self.mname}")
+		# TMDB read
+		print(f"[TMDB] Selected: {self.mname}")
 		self.showBackdrop()
 		callInThread(self.tmdbSearch)
 
 	def tmdbSearch(self):
 		self.lang = config.plugins.tmdb.lang.value
-		self['searchinfo'].setText(_("TMDb: ") + _("Loading..."))
-		res = []
+		self['searchinfo'].setText(_("TMDB: ") + _("Loading..."))
+		self.list = []
+		self.season_eps = []
 		# Seasons
 		try:
-			json_data_seasons = tmdb.TV(self.id).info(language=self.lang)
+			json_data_seasons = self.info if self.info else tmdb.TV(self.id).info(language=self.lang)
 		except Exception as e:
-			print(f"[TMDb] 5 Selectedtmdb.TV(self.id).info {e}")
-			self['searchinfo'].setText(_("TMDb: ") + _("No results found, or does not respond!"))
+			print(f"[TMDB] 5 tmdb.TV(self.id).info {e}")
+			self['searchinfo'].setText(_("TMDB: ") + _("No results found, or does not respond!"))
 			return
 		if json_data_seasons:
+			total = len(json_data_seasons['seasons'])
+			progress = total > 1
+			if progress:
+				count = 1
+				loading = _("TMDB: ") + _("Loading...")
 			for seasons in json_data_seasons['seasons']:
-				print(f"[TMDb] Season: {seasons['season_number']}")
+				if progress:
+					self['searchinfo'].setText(f"{loading} ({count}/{total})")
+					count += 1
+				print(f"[TMDB] Season: {seasons['season_number']}")
 				fid = str(seasons['id'])
 				season = seasons['season_number']
 
 				# Episodes
 				json_data_episodes = tmdb.TV_Seasons(self.id, season).info(language=self.lang)
-				titledate = f"({json_data_episodes['air_date'][:4]})"
-				title = str(json_data_episodes['name'])
-				title = f"{title} {titledate}"
-				overview = str(json_data_episodes['overview'])
-				coverPath = str(json_data_episodes['poster_path'])
-				# cover = f"{tempDir}{fid}.jpg"
-				url_cover = f"http://image.tmdb.org/t/p/{config.plugins.tmdb.themoviedb_coversize.value}/{coverPath}"
-				if fid != "" or title != "":
-					res.append(((title, url_cover, overview, fid, None),))
+				titledate = str(json_data_episodes['air_date'])[:7]
+				titledate = "" if titledate == "None" else f" ({titledate})"
+				title = f"{json_data_episodes['name']} / {len(json_data_episodes['episodes'])}{titledate}"
+				overview = json_data_episodes['overview']
+				coverPath = json_data_episodes['poster_path']
+				url_cover = self.imageURL(coverPath)
+				self.list.append([False, ((title, url_cover, overview, fid, len(self.list)),)])
 
+				eps = []
 				for names in json_data_episodes['episodes']:
 					fid = str(names['id'])
 					title = str(names['episode_number'])
-					name = str(names['name'])
-					title = "%+6s %s" % (title, name)
-					overview = str(names['overview'])
-					coverPath = str(names['still_path'])
-					# cover = f"{tempDir}{fid}.jpg"
-					url_cover = f"http://image.tmdb.org/t/p/{config.plugins.tmdb.themoviedb_coversize.value}/{coverPath}"
+					name = names['name']
+					title = f"{title:>6} {name}"
+					overview = names['overview']
+					coverPath = names['still_path']
+					url_cover = self.imageURL(coverPath)
 					if fid != "" or title != "":
-						res.append(((title, url_cover, overview, fid, None),))
-			self['list'].setList(res)
-			self.piclist = res
-			self.getInfo()
-			self['searchinfo'].setText(f"{self.mname}")
+						eps.append(((title, url_cover, overview, fid, None),))
+				self.season_eps.append(eps)
+			self.setList()
+			self['searchinfo'].setText(self.mname)
 		else:
-			self['searchinfo'].setText(_("TMDb: ") + _("No results found, or does not respond!"))
+			self['searchinfo'].setText(_("TMDB: ") + _("No results found, or does not respond!"))
+
+	def setList(self):
+		res = []
+		season = 0
+		for expanded, entry in self.list:
+			res.append(entry)
+			if expanded is not None:
+				if expanded:
+					res += self.season_eps[season]
+				season += 1
+		self['list'].setList(res)
+		self.getInfo()
 
 	def getInfo(self):
-		self['data'].setText("")
+		check = self['list'].getCurrent()
 		try:
-			url_cover = self['list'].getCurrent()[1]
+			url_cover = check[1]
 		except Exception:
 			self.showCover(noCover)
 			return
-		fid = self['list'].getCurrent()[3]
+		self['data'].setText(check[2])
+		if check[4] is None:
+			state = ""
+		else:
+			state = self.list[check[4]][0] and _("Collapse") or _("Expand")
+		self['key_green'].setText(state)
 		if url_cover.endswith("None"):
 			self.showCover(noCover)
 		else:
-			fileName = f"{tempDir}{fid}.jpg"
+			fid = check[3]
+			fileName = f"{tempDir}{self.media}-{self.id}-{fid}.jpg"
 			if not exists(fileName):
-				callInThread(threadDownloadPage, url_cover, fileName, boundFunction(self.getData, fileName), self.dataError)
+				self.delayDownload(url_cover, fileName, self.getData, self.dataError)
 			else:
 				self.showCover(fileName)
 
-	def getData(self, coverSaved, *args, **kwargs):
-		self.showCover(coverSaved)
+	def getData(self, coverSaved, url_cover):
+		if 'list' in self and url_cover == self['list'].getCurrent()[1]:
+			self.showCover(coverSaved)
 
-	def dataError(self, error):
-		print(f"[TMDb] Error: {error}")
+	def dataError(self, error, url_cover):
+		print(f"[TMDB] Error: {error}")
+		self.getData(noCover, url_cover)
 
 	def showCover(self, coverName):
 		if not exists(coverName):
 			coverName = noCover
 		if exists(coverName):
 			self.decodeCover(coverName)
-		self.ok()  # Shortcut
-
-	def showBackdrop(self):
-		backdropSaved = f"{tempDir}backdrop.jpg"
-		if exists(backdropSaved):
-			self.decodeBackdrop(backdropSaved)
 
 	def ok(self):
 		check = self['list'].getCurrent()
-		if check is not None:
-			data = self['list'].getCurrent()[2]
-			self['data'].setText(data)
+		if check is not None and check[4] is not None:
+			self.list[check[4]][0] ^= True
+			self.setList()
 
 	def keyLeft(self):
 		check = self['list'].getCurrent()
@@ -1443,13 +1605,156 @@ class tmdbScreenSeason(Screen, HelpableScreen, CoverHelper):
 			self.getInfo()
 
 	def chDown(self):
-		self['data'].pageUp()
+		self['data'].pageDown()
 
 	def chUp(self):
-		self['data'].pageDown()
+		self['data'].pageUp()
 
 	def keyBlue(self):
 		self.session.open(tmdbConfigScreen)
+
+	def cancel(self):
+		self.close()
+
+
+class tmdbScreenReviews(Screen, HelpableScreen, CoverHelper):
+	skin = tmdbScreenReviewsSkin
+
+	def __init__(self, session, mname, fid, media):
+		Screen.__init__(self, session)
+		self.mname = mname
+		self.id = fid
+		self.media = media
+		self.movie = self.media == "movie"
+
+		HelpableScreen.__init__(self)
+		self["actions"] = HelpableActionMap(self, "TMDbActions",
+			{
+				"cancel": (self.cancel, _("Exit")),
+				"up": (self.keyUp, _("Selection up")),
+				"down": (self.keyDown, _("Selection down")),
+				"prevBouquet": (self.chDown, _("Review down")),
+				"nextBouquet": (self.chUp, _("Review up")),
+				"right": (self.keyRight, _("Page down")),
+				"left": (self.keyLeft, _("Page up")),
+				"red": (self.cancel, _("Exit"))
+			}, -1)
+
+		self['searchinfo'] = Label(_("TMDB: ") + _("Loading..."))
+		self['data'] = ScrollLabel("")
+		self['key_red'] = Label(_("Exit"))
+		self['list'] = createList()
+
+		CoverHelper.__init__(self, True)
+
+		self.onLayoutFinish.append(self.onFinish)
+
+	def onFinish(self):
+		# TMDB read
+		print(f"[TMDB] Selected: {self.mname}")
+		self.showBackdrop()
+		callInThread(self.tmdbSearch)
+
+	def tmdbSearch(self):
+		self.lang = config.plugins.tmdb.lang.value
+		self['searchinfo'].setText(_("TMDB: ") + _("Loading..."))
+		# Reviews
+		try:
+			api = tmdb.Movies(self.id) if self.movie else tmdb.TV(self.id)
+			json_data_reviews = api.reviews(language=self.lang)
+			if json_data_reviews['total_results'] == 0 and self.lang != "en":
+				json_data_reviews = api.reviews(language="en")
+		except Exception as e:
+			print("[TMDB] 6 api.reviews", e)
+			self['searchinfo'].setText(_("TMDB: ") + _("No results found, or does not respond!"))
+			return
+		if json_data_reviews:
+			res = []
+			for review in json_data_reviews['results']:
+				author = review['author']
+				rating = review['author_details']['rating']
+				if rating:
+					rating = str(int(rating))
+					if len(rating) == 1:
+						rating = f"  {rating}"
+				else:
+					rating = "    "
+				date = review['created_at'][:10]
+				avatar = review['author_details']['avatar_path']
+				content = review['content']
+				# Strip supposed HTML tags.
+				content = sub(r'</?[^>]+>', '', content)
+				title = f"{rating}  {date} {author}"
+				url_cover = self.avatarURL(avatar)
+				res.append(((title, url_cover, content),))
+			self['list'].setList(res)
+			self.getInfo()
+			self['searchinfo'].setText(self.mname)
+			if not res:
+				self['data'].setText(_("No reviews."))
+		else:
+			self['searchinfo'].setText(_("TMDB: ") + _("No results found, or does not respond!"))
+
+	def getInfo(self):
+		check = self['list'].getCurrent()
+		try:
+			url_cover = check[1]
+		except Exception:
+			self.showCover(noCoverP)
+			return
+		self['data'].setText(check[2])
+		if url_cover.endswith("None"):
+			self.showCover(noCoverP)
+		else:
+			fileName = f"{tempDir}avatar-{basename(url_cover)}")
+			if not exists(fileName):
+				self.delayDownload(url_cover, fileName, self.getData, self.dataError)
+			else:
+				self.showCover(fileName)
+
+	def getData(self, coverSaved, url_cover):
+		if 'list' in self and url_cover == self['list'].getCurrent()[1]:
+			self.showCover(coverSaved)
+
+	def dataError(self, error, url_cover):
+		print(f"[TMDB] Error: {error}")
+		self.getData(noCoverP, url_cover)
+
+	def showCover(self, coverName):
+		if not exists(coverName):
+			coverName = noCoverP
+		if exists(coverName):
+			self.decodeCover(coverName)
+
+	def keyLeft(self):
+		check = self['list'].getCurrent()
+		if check is not None:
+			self['list'].pageUp()
+			self.getInfo()
+
+	def keyRight(self):
+		check = self['list'].getCurrent()
+		if check is not None:
+			self['list'].pageDown()
+			self.getInfo()
+
+	def keyDown(self):
+		check = self['list'].getCurrent()
+		if check is not None:
+			self['list'].down()
+			self.getInfo()
+
+	def keyUp(self):
+		check = self['list'].getCurrent()
+		if check is not None:
+			self['list'].up()
+			self.getInfo()
+
+	def chDown(self):
+		self['data'].pageDown()
+
+	def chUp(self):
+		self['data'].pageUp()
 
 	def cancel(self):
 		self.close()
