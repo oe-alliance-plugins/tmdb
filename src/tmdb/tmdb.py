@@ -1706,7 +1706,7 @@ class tmdbScreenReviews(Screen, HelpableScreen, CoverHelper):
 		if url_cover.endswith("None"):
 			self.showCover(noCoverP)
 		else:
-			fileName = f"{tempDir}avatar-{basename(url_cover)}")
+			fileName = f"{tempDir}avatar-{basename(url_cover)}"
 			if not exists(fileName):
 				self.delayDownload(url_cover, fileName, self.getData, self.dataError)
 			else:
