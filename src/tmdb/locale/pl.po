@@ -43,7 +43,7 @@ msgstr "Miejsce urodzenia"
 
 #: ../tmdb.py:1348
 msgid "Born"
-msgstr "Urodzić się w"
+msgstr "Urodził/a się w"
 
 #: ../tmdb.py:590 ../tmdb.py:597 ../tmdb.py:627 ../tmdb.py:764
 msgid "Cast"
@@ -440,22 +440,22 @@ msgstr "Strona"
 #, python-brace-format
 msgid "{n} Episode"
 msgid_plural "{n} Episodes"
-msgstr[0] "{n} Odcinków"
-msgstr[1] "{n} Odcinek"
-msgstr[2] "{n} Odcinki"
+msgstr[0] "{n} Odcinek"
+msgstr[1] "{n} Odcinki"
+msgstr[2] "{n} Odcinków"
 
 #: ../tmdb.py:828
 #, python-brace-format
 msgid "{n} Season"
 msgid_plural "{n} Seasons"
-msgstr[0] "{n} Sezonów"
-msgstr[1] "{n} Sezon"
-msgstr[2] "{n} Sezony"
+msgstr[0] "{n} Sezon"
+msgstr[1] "{n} Sezony"
+msgstr[2] "{n} Sezonów"
 
 #: ../tmdb.py:1391
 #, python-brace-format
 msgid "{n} episode"
 msgid_plural "{n} episodes"
-msgstr[0] "{n} odcinków"
-msgstr[1] "{n} odcinek"
-msgstr[2] "{n} odcinki"
+msgstr[0] "{n} odcinek"
+msgstr[1] "{n} odcinki"
+msgstr[2] "{n} odcinków"
