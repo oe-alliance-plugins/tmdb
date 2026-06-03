@@ -21,8 +21,8 @@ from . import tmdb
 
 pname = "TMDB"
 pdesc = _("Show movie details from TMDB")
-pversion = "1.0.2"
-pdate = "20260508"
+pversion = "1.0.4"
+pdate = "20260602"
 
 defaultLang = "en"
 try:
