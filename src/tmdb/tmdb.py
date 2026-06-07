@@ -456,7 +456,10 @@ class tmdbScreen(Screen, HelpableScreen, CoverHelper):
 					self['searchinfo'].setText(f"{_('TMDB: ')}{self.searchtitle} ({_('page ')}{self.page}/{self.totalpages}) {self.title}")
 				else:
 					self['searchinfo'].setText(f"{_('TMDB: ')}{_('Results for %s') % self.text}")
-				self['list'].moveTop()
+				if hasattr(self['list'], 'moveTop'):
+					self['list'].moveTop()
+				else:
+					self['list'].goTop()
 				self.getInfo()
 		else:
 			print("[TMDB] data not found")
