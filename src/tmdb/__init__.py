@@ -30,4 +30,4 @@ def ngettext(singular, plural, n):
 localeInit()
 language.addCallback(localeInit)
 
-__version__ = "1.0.4"
+__version__ = "1.0.5"

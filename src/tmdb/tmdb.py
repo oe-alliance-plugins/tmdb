@@ -1021,7 +1021,7 @@ class tmdbScreenMovie(Screen, HelpableScreen, CoverHelper):
 					width, height = config.plugins.tmdb.coverQuality.value.split("x", 1)
 					img = Image.open(self.coverName)
 					img = img.convert('RGBA', colors=256)
-					img = img.resize((int(width), int(height)), Image.LANCZOS)
+					img = img.resize((int(width), int(height)), Image.Resampling.LANCZOS)
 					img.save(self.coverName)
 
 				shutil.copy(self.coverName, f"{saveFile}.jpg")
@@ -1039,7 +1039,7 @@ class tmdbScreenMovie(Screen, HelpableScreen, CoverHelper):
 					width, height = config.plugins.tmdb.backdropQuality.value.split("x", 1)
 					img = Image.open(backdrop_saved)
 					img = img.convert('RGBA', colors=256)
-					img = img.resize((int(width), int(height)), Image.LANCZOS)
+					img = img.resize((int(width), int(height)), Image.Resampling.LANCZOS)
 					img.save(backdrop_saved)
 
 				shutil.copy(backdrop_saved, f"{saveFile}.bdp.jpg")
